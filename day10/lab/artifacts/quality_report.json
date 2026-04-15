@@ -1,0 +1,74 @@
+{
+  "run_id": "20260415T155947",
+  "checked_at": "2026-04-15T08:59:47.475498+00:00",
+  "rows_total": 23,
+  "total_checks": 9,
+  "passed": 8,
+  "failed": 1,
+  "pass_rate": 0.8889,
+  "results": [
+    {
+      "name": "completeness.ticket_id_not_null",
+      "passed": true,
+      "detail": "Tất cả ticket_id không null",
+      "severity": "error",
+      "value": 0
+    },
+    {
+      "name": "completeness.message_not_null",
+      "passed": true,
+      "detail": "Tất cả message không null",
+      "severity": "error",
+      "value": 0
+    },
+    {
+      "name": "completeness.timestamp_not_null",
+      "passed": false,
+      "detail": "1 dòng thiếu timestamp",
+      "severity": "warning",
+      "value": 1
+    },
+    {
+      "name": "validity.channel_in_allowed_set",
+      "passed": true,
+      "detail": "Tất cả channel nằm trong {'phone', 'chat', 'email'}",
+      "severity": "error",
+      "value": 0
+    },
+    {
+      "name": "validity.priority_in_allowed_set",
+      "passed": true,
+      "detail": "Tất cả priority nằm trong {'high', 'low', 'medium'}",
+      "severity": "error",
+      "value": 0
+    },
+    {
+      "name": "validity.resolution_minutes_non_negative",
+      "passed": true,
+      "detail": "Tất cả resolution_minutes >= 0",
+      "severity": "error",
+      "value": 0
+    },
+    {
+      "name": "uniqueness.ticket_id_unique",
+      "passed": true,
+      "detail": "Tất cả ticket_id là duy nhất",
+      "severity": "error",
+      "value": 0
+    },
+    {
+      "name": "timeliness.data_freshness_within_sla",
+      "passed": true,
+      "detail": "Dữ liệu mới nhất trong 48h (oldest=31.0h ago)",
+      "severity": "warning",
+      "value": 31.0
+    },
+    {
+      "name": "volume.minimum_row_count",
+      "passed": true,
+      "detail": "Đủ số dòng tối thiểu (>= 5): 23 dòng",
+      "severity": "error",
+      "value": 23
+    }
+  ]
+}

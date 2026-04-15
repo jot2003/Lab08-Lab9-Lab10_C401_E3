@@ -1,0 +1,24 @@
+ticket_id,message,timestamp,channel,priority,resolution_minutes
+TKT-001,Không thể truy cập email công ty từ sáng sớm,2026-04-14 09:00:00,email,high,45.0
+TKT-002,Cần reset mật khẩu VPN,2026-04-14 09:15:00,chat,medium,20.0
+TKT-004,Màn hình laptop nhấp nháy liên tục,2026-04-14 10:00:00,email,high,60.0
+TKT-005,Yêu cầu cài phần mềm mới cho bộ phận kế toán,2026-04-14 10:15:00,chat,medium,90.0
+TKT-006,Không kết nối được WiFi ở phòng họp B,2026-04-14 10:30:00,phone,low,
+TKT-007,Máy in tầng 3 không hoạt động,,,low,15.0
+TKT-008,VPN ngắt kết nối mỗi 10 phút,2026-04-14 11:00:00,chat,high,30.0
+TKT-009,Yêu cầu cấp quyền truy cập shared drive,2026-04-14 11:15:00,email,medium,25.0
+TKT-010,Màn hình xanh chết (BSOD) trên máy trạm,2026-04-14 11:30:00,phone,high,120.0
+TKT-011,Không đăng nhập được vào hệ thống CRM,2026-04-14 12:00:00,email,high,35.0
+TKT-012,Yêu cầu tăng dung lượng hộp thư,2026-04-14 12:15:00,chat,low,50.0
+TKT-013,Máy tính khởi động chậm bất thường,2026-04-14 12:30:00,phone,medium,75.0
+TKT-015,Lỗi kết nối đến server nội bộ từ xa,2026-04-14 13:15:00,chat,high,55.0
+TKT-016,Mất file quan trọng sau khi update Windows,2026-04-14 13:30:00,phone,high,200.0
+TKT-017,Yêu cầu tạo tài khoản cho nhân viên mới,2026-04-14 14:00:00,email,low,20.0
+TKT-018,Thiết bị ngoại vi USB không được nhận dạng,2026-04-14 14:15:00,chat,medium,45.0
+TKT-019,Lỗi xác thực 2 bước khi đăng nhập từ ngoài văn phòng,2026-04-14 14:30:00,phone,high,65.0
+TKT-020,Không in được tài liệu dù đã kết nối mạng,2026-04-14 15:00:00,email,low,30.0
+TKT-021,Yêu cầu hỗ trợ cấu hình email trên điện thoại,2026-04-14 15:15:00,chat,medium,25.0
+TKT-022,Phần mềm diệt virus cảnh báo mối đe dọa,2026-04-14 15:30:00,phone,high,90.0
+TKT-023,Không truy cập được hệ thống chấm công,2026-04-14 16:00:00,email,medium,40.0
+TKT-024,Lỗi đồng bộ dữ liệu giữa hai phần mềm,2026-04-14 16:15:00,chat,medium,
+TKT-025,Màn hình máy tính hiện thị sai màu sắc,2026-04-14 16:30:00,phone,low,20.0

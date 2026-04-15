@@ -1,0 +1,57 @@
+{
+  "run_id": "20260415T155947",
+  "checked_at": "2026-04-15T08:59:47.476636+00:00",
+  "source_file": "data/raw/helpdesk_tickets_dirty.csv",
+  "overall_status": "WARN",
+  "results": [
+    {
+      "check": "lineage.source_file_exists",
+      "status": "PASS",
+      "message": "Source file tồn tại (2.4 KB): data/raw/helpdesk_tickets_dirty.csv",
+      "value": 2.44
+    },
+    {
+      "check": "schema.required_columns_present",
+      "status": "PASS",
+      "message": "Đủ tất cả cột bắt buộc",
+      "value": [
+        "ticket_id",
+        "message",
+        "timestamp",
+        "channel",
+        "priority",
+        "resolution_minutes"
+      ]
+    },
+    {
+      "check": "freshness.latest_record_age",
+      "status": "WARN",
+      "message": "Dữ liệu cách nay 23.5h — gần ngưỡng SLA 24h",
+      "value": 23.5
+    },
+    {
+      "check": "volume.row_count",
+      "status": "PASS",
+      "message": "23 dòng — nằm trong ngưỡng bình thường [10, 100000]",
+      "value": 23
+    },
+    {
+      "check": "distribution.null_rate.channel",
+      "status": "PASS",
+      "message": "Null rate=4.3% — trong ngưỡng chấp nhận",
+      "value": 0.0435
+    },
+    {
+      "check": "distribution.null_rate.priority",
+      "status": "PASS",
+      "message": "Null rate=0.0% — trong ngưỡng chấp nhận",
+      "value": 0.0
+    },
+    {
+      "check": "distribution.null_rate.timestamp",
+      "status": "PASS",
+      "message": "Null rate=4.3% — trong ngưỡng chấp nhận",
+      "value": 0.0435
+    }
+  ]
+}
