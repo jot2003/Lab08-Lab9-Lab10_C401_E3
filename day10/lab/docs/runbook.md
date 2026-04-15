@@ -1,255 +1,168 @@
-# Runbook — Data Pipeline Incident Triage
-> Day 10 Lab · Trợ lý IT nội bộ CS + IT Helpdesk
+# Runbook — Lab Day 10: Data Pipeline Incident Response
+
+**Owner (D10-T04):** Nguyễn Thành Nam (2A202600205)  
+**Cập nhật:** 2026-04-15  
+**Áp dụng cho:** `day10/lab/` pipeline — `policy_export_dirty.csv` → clean → embed → `day10_kb`
+
+> Mỗi incident ghi theo đúng 5 mục: **Symptom → Detection → Diagnosis → Mitigation → Prevention**.  
+> Số liệu trích từ run thực tế: `run_id=dung-after-final`, manifest tại `artifacts/manifests/manifest_dung-after-final.json`.
 
 ---
 
-## Mục đích
+## INC-001 — Freshness FAIL: Dữ liệu export quá cũ
 
-Runbook này hướng dẫn xử lý các sự cố phổ biến trong data pipeline theo quy trình:
-**Detect → Isolate → Fix → Verify → Post-mortem**
+### Symptom
 
-Ai cũng có thể dùng runbook này — không cần biết code sâu.
+Agent trả lời đúng về nội dung policy nhưng phiên bản có thể đã lỗi thời. Khi hỏi về chính sách hoàn tiền hoặc SLA mới nhất, câu trả lời dựa trên snapshot từ ngày xa so với hiện tại. User/auditor không thể biết dữ liệu trong vector store đến từ khi nào.
 
----
-
-## Bản đồ triệu chứng → Hành động
-
-| Triệu chứng | Nguyên nhân có thể | Chuyển đến |
-|-------------|-------------------|-----------|
-| Agent trả lời thông tin cũ | Freshness breach | [INC-001] |
-| Agent hallucinate thông tin không có trong docs | Dirty data vào vector store | [INC-002] |
-| Pipeline crash khi chạy | Lỗi schema hoặc encoding | [INC-003] |
-| Quality pass_rate < 85% | Nhiều giá trị invalid hoặc null | [INC-004] |
-| Monitor report: FAIL | Xem chi tiết check nào fail | [INC-005] |
-
----
-
-## [INC-001] Freshness Breach — Dữ liệu bị stale
-
-**Dấu hiệu:**
-- `monitoring/freshness_check.py` báo `FAIL` với `freshness.latest_record_age`
-- Agent trả lời thông tin của ngày hôm qua hoặc cũ hơn
-
-**Quy trình xử lý:**
-
+Ví dụ cụ thể từ run `dung-after-final`:
 ```
-Bước 1 — Detect
-  Đọc artifacts/monitor_report.json
-  → Tìm field: "check": "freshness.latest_record_age"
-  → Xem "value": số giờ kể từ bản ghi mới nhất
-
-Bước 2 — Isolate
-  Kiểm tra file source có được update không?
-  → ls -la data/raw/   (xem Last Modified)
-  Nếu file không đổi: vấn đề ở upstream (hệ thống export)
-  Nếu file mới nhưng data cũ: vấn đề ở field timestamp trong CSV
-
-Bước 3 — Fix
-  Nếu upstream chưa export:
-    → Liên hệ IT Support Team để re-export CSV hôm nay
-    → Copy file mới vào data/raw/
-  Nếu timestamp sai:
-    → Kiểm tra múi giờ server export (UTC vs UTC+7)
-    → Sửa offset trong cleaning_rules.py nếu cần
-
-Bước 4 — Verify
-  python etl_pipeline.py --input data/raw/[file_mới].csv
-  → Kiểm tra monitor_status = PASS hoặc WARN
-
-Bước 5 — Post-mortem
-  Ghi vào bảng Post-mortem ở cuối runbook này
+latest_exported_at = "2026-04-10T08:00:00"
+run_timestamp      = "2026-04-15T08:23:18"
+→ delta = 120.388h (≈ 5.02 ngày) — vượt SLA 24h
 ```
 
----
+### Detection
 
-## [INC-002] Dirty Data vào Vector Store — Agent Hallucinate
-
-**Dấu hiệu:**
-- Agent trả lời thông tin sai (priority không đúng, channel sai, số liệu bịa)
-- Quality report: có `invalid_channel_values` hoặc `invalid_priority` > 0
-
-**Quy trình xử lý:**
+Metric báo trong log `artifacts/logs/run_dung-after-final.log`:
 
 ```
-Bước 1 — Detect
-  Đọc artifacts/quality_report.json
-  → Tìm các check với "passed": false
-  → Đọc "detail" để biết số dòng vi phạm
-
-Bước 2 — Isolate
-  Mở data/raw/helpdesk_tickets_dirty.csv
-  Lọc theo cột vi phạm:
-    → Cột channel: tìm giá trị khác email/chat/phone
-    → Cột priority: tìm giá trị khác low/medium/high
-
-Bước 3 — Fix
-  Nếu lỗi có thể map được:
-    → Sửa trong transform/cleaning_rules.py (thêm vào priority_map hoặc channel_map)
-    → Chạy lại pipeline
-  Nếu lỗi quá nhiều (> 20% dòng):
-    → Liên hệ upstream để sửa schema export
-    → Tạm thời dùng data/cleaned/ từ lần chạy trước (rollback)
-
-Bước 4 — Verify
-  python etl_pipeline.py
-  → Kiểm tra: quality report pass_rate >= 85%
-  → Kiểm tra: invalid_channel = 0, invalid_priority = 0
-
-Bước 5 — Post-mortem
-  Ghi nguyên nhân gốc rễ vào bảng Post-mortem
+freshness_check=FAIL {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 120.388, "sla_hours": 24.0, "reason": "freshness_sla_exceeded"}
+event_json={"ts": "2026-04-15T08:23:18...", "level": "ERROR", "task_id": "D10-T05", "event": "freshness_check", ...}
 ```
 
----
-
-## [INC-003] Pipeline Crash — Lỗi Schema hoặc Encoding
-
-**Dấu hiệu:**
-- `python etl_pipeline.py` báo `UnicodeDecodeError` hoặc `KeyError` hoặc `ValueError`
-- Thông báo lỗi: `Missing required columns: [...]`
-
-**Quy trình xử lý:**
-
-```
-Bước 1 — Detect
-  Đọc traceback trong terminal:
-    UnicodeDecodeError  → vấn đề encoding
-    KeyError            → thiếu cột trong CSV
-    ValueError          → schema không khớp contract
-
-Bước 2 — Isolate
-  Mở file CSV bằng editor:
-    → Kiểm tra hàng đầu tiên (header): có đủ 6 cột không?
-    → Kiểm tra encoding: mở bằng UTF-8, Latin-1 hay khác?
-
-Bước 3 — Fix (theo loại lỗi)
-
-  UnicodeDecodeError:
-    python -c "import pandas as pd; pd.read_csv('data/raw/file.csv', encoding='latin-1')"
-    Nếu đọc được: thêm encoding='latin-1' vào ingest() trong etl_pipeline.py
-
-  Thiếu cột:
-    Kiểm tra file CSV xem header có đúng không
-    Nếu tên cột thay đổi: cập nhật required_columns trong expectations.py và contract này
-
-Bước 4 — Verify
-  python etl_pipeline.py
-  → Không có traceback, pipeline chạy đến cuối
-
-Bước 5 — Post-mortem
-  Ghi vào bảng Post-mortem
+Đọc nhanh manifest:
+```bash
+python etl_pipeline.py freshness --manifest artifacts/manifests/manifest_dung-after-final.json
 ```
 
----
+Kết quả `FAIL` khi `latest_exported_at` < (now − `FRESHNESS_SLA_HOURS`).  
+Mặc định `FRESHNESS_SLA_HOURS=24` (đặt trong `.env`).
 
-## [INC-004] Quality Pass Rate thấp (< 85%)
+### Diagnosis
 
-**Dấu hiệu:**
-- Log pipeline: `CẢNH BÁO: pass_rate=XX% thấp hơn ngưỡng 85%`
-- Quality report: nhiều checks `"passed": false`
+| Bước | Việc làm | Kết quả mong đợi |
+|------|----------|------------------|
+| 1 | Mở `artifacts/manifests/manifest_*.json` mới nhất | Kiểm tra `latest_exported_at` và `run_timestamp` |
+| 2 | Tính delta: `run_timestamp - latest_exported_at` | > 24h → FAIL; 12–24h → WARN; < 12h → PASS |
+| 3 | Kiểm tra `data/raw/policy_export_dirty.csv` | Xem `exported_at` của dòng mới nhất — nếu cùng ngày cũ: vấn đề ở upstream export |
+| 4 | Chạy `python eval_retrieval.py` | Nếu `contains_expected` vẫn đúng → nội dung chưa thay đổi, rủi ro thấp; nếu sai → cần rollback |
 
-**Quy trình xử lý:**
+**Root cause điển hình:**
+- Hệ thống upstream (DB/API) chưa export lại CSV sau khi có bản policy mới
+- Job export chạy nhưng file không được copy vào `data/raw/`
+- `exported_at` trong CSV là timestamp của lần export trước (pipeline tính theo max của cột này)
 
-```
-Bước 1 — Detect
-  Đọc artifacts/quality_report.json → trường "failed"
-  Đọc từng item trong "results" với "passed": false
-
-Bước 2 — Isolate
-  Phân loại vi phạm:
-    severity=error   → cần fix ngay
-    severity=warning → ghi nhận, có thể chạy tiếp
-
-Bước 3 — Fix
-  completeness failure:
-    → Xem bao nhiêu dòng null → quyết định drop hay giữ với flag
-  validity failure:
-    → Cập nhật cleaning_rules.py để map thêm giá trị
-  uniqueness failure:
-    → remove_duplicates đã chạy chưa? Kiểm tra thứ tự steps
-  timeliness failure:
-    → Xem INC-001
-
-Bước 4 — Verify
-  Chạy lại pipeline → pass_rate >= 85%
-
-Bước 5 — Post-mortem
-  Ghi lý do pass_rate thấp + cách sửa
-```
-
----
-
-## [INC-005] Monitor Status = FAIL
-
-**Dấu hiệu:**
-- `monitoring/freshness_check.py` in ra `FAIL` (màu đỏ)
-- artifacts/monitor_report.json: `"overall_status": "FAIL"`
-
-**Quy trình xử lý:**
-
-```
-Bước 1 — Detect
-  Đọc monitor_report.json → tìm item "status": "FAIL"
-  Đọc "message" để hiểu chi tiết
-
-Bước 2 — Route
-  freshness.latest_record_age FAIL → Xem INC-001
-  schema.required_columns_present FAIL → Xem INC-003
-  volume.row_count_min FAIL → kiểm tra ingestion có bị cắt không
-  distribution.null_rate.X FAIL → > 30% null ở cột X → Xem INC-002
-
-Bước 3 — Fix theo route ở trên
-
-Bước 4 — Verify
-  python monitoring/freshness_check.py data/raw/[file].csv
-  → overall_status = PASS hoặc WARN
-
-Bước 5 — Post-mortem
-```
-
----
-
-## Lệnh hữu ích — Quick Reference
+### Mitigation
 
 ```bash
-# Chạy full pipeline
-python etl_pipeline.py
+# Bước 1: Lấy file export mới từ upstream
+cp /path/to/new_export.csv day10/lab/data/raw/policy_export_dirty.csv
 
-# Chạy với file cụ thể
-python etl_pipeline.py --input data/raw/helpdesk_tickets_dirty.csv
+# Bước 2: Chạy lại pipeline với run-id mới
+cd day10/lab
+python etl_pipeline.py run --run-id recovery-$(date +%Y%m%d)
 
-# Chỉ chạy monitor
-python monitoring/freshness_check.py data/raw/helpdesk_tickets_dirty.csv
+# Bước 3: Verify freshness
+python etl_pipeline.py freshness --manifest artifacts/manifests/manifest_recovery-*.json
+# Mong đợi: PASS hoặc WARN
 
-# Xem quality report
-type artifacts/quality_report.json
-
-# Xem monitor report
-type artifacts/monitor_report.json
-
-# Xem before/after evidence
-type artifacts/before_after_eval.csv
+# Bước 4: Re-run eval để xác nhận chất lượng
+python eval_retrieval.py --out artifacts/eval/recovery_eval.csv
 ```
 
----
+Nếu không có export mới ngay:
+- Thêm banner "data last updated: YYYY-MM-DD" vào giao diện agent
+- Ghi incident vào bảng post-mortem (cuối runbook)
+- **Không rollback embed** trừ khi có bằng chứng nội dung sai (xem `hits_forbidden` trong eval)
 
-## Bảng Post-mortem (cập nhật khi xử lý incident)
+### Prevention
 
-| Ngày | Incident | Nguyên nhân gốc rễ | Cách fix | Người xử lý | Thời gian resolve |
-|------|----------|--------------------|----------|-------------|-------------------|
-| 2026-04-15 | INC-003 (UnicodeEncodeError trên Windows) | stdout Windows không hỗ trợ UTF-8 mặc định | Thêm `sys.stdout.reconfigure(encoding='utf-8')` vào đầu các module | Nguyễn Thành Nam | 5 phút |
-| | | | | | |
-
----
-
-## Checklist trước khi deploy pipeline lên production
-
-- [ ] Chạy `python etl_pipeline.py` với sample data → không có traceback
-- [ ] Quality pass_rate >= 85%
-- [ ] Monitor status = PASS hoặc WARN (không phải FAIL)
-- [ ] File `artifacts/before_after_eval.csv` được tạo thành công
-- [ ] Không có file `.env` hoặc credentials trong repo
-- [ ] Freshness check: data source cập nhật trong 24h
+1. **Đặt alert tự động:** thêm bước `freshness_check` vào CI/CD — job fail nếu `FAIL`
+2. **Tăng tần suất export:** từ hàng tuần → hàng ngày; cấu hình cron upstream
+3. **Đo 2 boundary:** log cả `ingest_timestamp` (khi pipeline đọc file) và `publish_timestamp` (khi embed xong) vào manifest — phân biệt "data cũ" vs "pipeline chậm"
+4. **Mở rộng expectation:** thêm check `exported_at_freshness` vào `quality/expectations.py` (hiện chưa có) để halt khi tất cả dòng đều có `exported_at` cũ hơn SLA
 
 ---
 
-*Day 10 Lab — AI in Action · VinUniversity · 2026*
+## INC-002 — Stale Refund Chunk: Chunk "14 ngày" từ migration v3 lọt vào index
+
+### Symptom
+
+Agent trả lời sai về thời hạn hoàn tiền: nói **"14 ngày làm việc"** thay vì **"7 ngày"** theo policy v4 hiện hành. Đây là lỗi nghiêm trọng vì ảnh hưởng trực tiếp đến quyền lợi khách hàng và có thể gây khiếu nại.
+
+Bằng chứng trước khi fix (`artifacts/eval/dung_before_bad_eval.csv`):
+```
+q_refund_window | top1_preview: "...trong vòng 14 ngày làm việc..." | hits_forbidden=yes
+```
+
+### Detection
+
+Metric báo trong eval CSV (`hits_forbidden=yes`):
+
+```csv
+q_refund_window,...,Yêu cầu hoàn tiền được chấp nhận trong vòng 14 ngày...,yes,yes,,3
+```
+
+Kiểm tra nhanh trong raw CSV:
+```
+chunk_id=3, doc_id=policy_refund_v4
+chunk_text="Yêu cầu hoàn tiền được chấp nhận trong vòng 14 ngày làm việc kể từ xác nhận đơn
+           (ghi chú: bản sync cũ policy-v3 — lỗi migration)."
+```
+
+Chunk 3 chứa từ khoá "lỗi migration" và số ngày sai (14 thay vì 7) — đây là tàn dư từ lần sync policy-v3.
+
+### Diagnosis
+
+| Bước | Việc làm | Kết quả mong đợi |
+|------|----------|------------------|
+| 1 | Mở `data/raw/policy_export_dirty.csv` | Tìm chunk có `chunk_text` chứa "14 ngày" hoặc "v3" hoặc "migration" |
+| 2 | Kiểm tra `effective_date` của chunk đó | Nếu `effective_date` cũ hơn policy hiện hành → stale |
+| 3 | Mở `artifacts/quarantine/quarantine_*.csv` | Chunk này có bị quarantine không? Nếu không → rule chưa bắt được |
+| 4 | Chạy `python eval_retrieval.py` với `--no-refund-fix` | Xác nhận `hits_forbidden=yes` → bằng chứng inject hoạt động đúng |
+| 5 | Chạy lại với fix bình thường | Xác nhận `hits_forbidden=no`; trong log: `expectation[refund_no_stale_14d_window] OK (halt) :: violations=0` |
+
+**Root cause:** Hệ thống export đồng bộ nhầm cả chunk từ policy-v3 (cũ) cùng với policy-v4 (hiện hành). Không có rule kiểm tra nội dung "stale marker" ("lỗi migration", "bản sync cũ").
+
+### Mitigation
+
+```bash
+# Confirm rule đang hoạt động (pipeline bình thường):
+python etl_pipeline.py run --run-id fix-refund-check
+
+# Xác nhận chunk 3 vào quarantine:
+cat artifacts/quarantine/quarantine_fix-refund-check.csv
+# Mong đợi: chunk_id=3 xuất hiện trong file này
+
+# Verify eval sau fix:
+python eval_retrieval.py --out artifacts/eval/fix_refund_eval.csv
+# Mong đợi: q_refund_window → hits_forbidden=no, top1_preview chứa "7 ngày"
+```
+
+Kết quả sau khi fix (`artifacts/eval/dung_after_final_eval.csv`):
+```
+q_refund_window | top1_preview: "Yêu cầu được gửi trong vòng 7 ngày làm việc..." | hits_forbidden=no
+```
+
+→ **Raw: 10 records → Cleaned: 4 records, Quarantine: 6 records** (bao gồm chunk 3)
+
+### Prevention
+
+1. **Rule "refund window fix"** trong `transform/cleaning_rules.py`: quarantine bất kỳ chunk nào có `chunk_text` chứa "14 ngày" kết hợp "hoàn tiền" hoặc chứa marker "lỗi migration" / "bản sync cũ"
+2. **Expectation `no_forbidden_content`** trong `quality/expectations.py`: halt nếu bất kỳ cleaned chunk nào matches danh sách pattern cấm
+3. **Upstream fix:** yêu cầu team export kiểm tra và xoá các chunk có annotation "v3" hoặc "migration" trước khi export
+4. **Thêm field `policy_version`** vào schema để pipeline có thể filter chính xác theo version
+
+---
+
+## Bảng Post-mortem
+
+| Ngày | run_id | Incident | Root cause | Cách fix | Người xử lý | Time to resolve |
+|------|--------|----------|------------|----------|-------------|-----------------|
+| 2026-04-15 | dung-after-final | INC-001: freshness FAIL | exported_at=2026-04-10, delta≈5 ngày > SLA 24h | Ghi nhận, chờ export mới; thêm freshness expectation | D10-T04 (Nam) | — |
+| 2026-04-15 | dung-after-final | INC-002: stale refund chunk | chunk_id=3 "14 ngày" từ v3 migration lọt vào index | apply_refund_window_fix=True → chunk 3 quarantined | D10-T02 (Được) + D10-T04 (Nam document) | Sprint 2→3 |
+
+---
+
+*Day 10 Lab — AI in Action · VinUniversity · 2026 · D10-T04 owner: Nguyễn Thành Nam*

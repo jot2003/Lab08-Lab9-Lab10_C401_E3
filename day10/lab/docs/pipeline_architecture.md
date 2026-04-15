@@ -1,177 +1,158 @@
-# Pipeline Architecture — Day 10 Lab
-> Trợ lý IT nội bộ CS + IT Helpdesk
+# Kiến trúc Pipeline — Lab Day 10
+
+**Nhóm:** C401-E3 (Hoang Kim Tri Thanh · Dang Dinh Tu Anh · Quach Gia Duoc · Pham Quoc Dung · Nguyen Thanh Nam)  
+**Cập nhật:** 2026-04-15  
+**Owner tài liệu (D10-T04):** Nguyễn Thành Nam
 
 ---
 
-## Tổng quan
-
-Day 10 xây dựng tầng data pipeline phía dưới toàn bộ hệ AI đã được dựng ở Day 08 (RAG) và Day 09 (Supervisor-Workers). Mục tiêu là đảm bảo dữ liệu feeding vào vector store **không bị stale, dirty, hoặc missing** trước khi agent trả lời.
-
-> _Garbage in → garbage out. Đừng debug model trước khi debug pipeline._
-
----
-
-## Kiến trúc tổng thể
+## 1. Sơ đồ luồng thực tế
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                    Sources (IT Helpdesk Data)                    │
-│  helpdesk_tickets.csv  │  policy_docs/  │  hr_docs/  │  API     │
-└──────────────┬─────────────────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     INGEST LAYER                                  │
-│  - Đọc CSV / text files                                          │
-│  - Ghi run_id + timestamp cho mỗi lần chạy                       │
-│  - Log: raw_records count                                        │
-└──────────────┬───────────────────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     TRANSFORM LAYER                               │
-│  transform/cleaning_rules.py                                     │
-│                                                                  │
-│  1. parse_timestamps      → chuẩn hoá kiểu dữ liệu               │
-│  2. normalize_channel     → email/chat/phone (lowercase)         │
-│  3. normalize_priority    → low/medium/high (urgent→high)        │
-│  4. fix_resolution_time   → loại giá trị âm / quá lớn           │
-│  5. remove_duplicates     → dedup theo ticket_id                 │
-│  6. drop_missing_required → xoá dòng thiếu ticket_id hoặc msg   │
-│                                                                  │
-│  Log: số dòng trước/sau từng bước                                │
-└──────────────┬───────────────────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     VALIDATE LAYER                                │
-│  quality/expectations.py                                         │
-│                                                                  │
-│  Completeness  : ticket_id, message, timestamp not null          │
-│  Validity      : channel ∈ {email,chat,phone}                    │
-│                  priority ∈ {low,medium,high}                    │
-│                  resolution_minutes ≥ 0                          │
-│  Uniqueness    : ticket_id unique                                │
-│  Timeliness    : data không cũ hơn 48h                          │
-│  Volume        : số dòng trong ngưỡng [10, 100_000]             │
-│                                                                  │
-│  pass_rate < 85% → pipeline vẫn chạy nhưng ghi cảnh báo         │
-└──────────────┬───────────────────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     MONITOR LAYER                                 │
-│  monitoring/freshness_check.py                                   │
-│                                                                  │
-│  Freshness  : dữ liệu mới nhất trong 24h (WARN) / 48h (FAIL)   │
-│  Volume     : row count trong ngưỡng bình thường                 │
-│  Schema     : đủ cột bắt buộc                                   │
-│  Distribution: null rate từng cột < 30%                         │
-│  Lineage    : file source tồn tại và có thể đọc                 │
-│                                                                  │
-│  Output: artifacts/monitor_report.json                          │
-└──────────────┬───────────────────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     OUTPUT / STORAGE                              │
-│                                                                  │
-│  data/cleaned/helpdesk_tickets_clean_<run_id>.csv               │
-│  artifacts/quality_report.json                                   │
-│  artifacts/monitor_report.json                                   │
-│  artifacts/before_after_eval.csv  (bằng chứng data quality)     │
-│                                                                  │
-│  [Bước tiếp theo — ngoài scope Day 10]                          │
-│  → Embed cleaned tickets vào ChromaDB                           │
-│  → Supervisor-Workers (Day 09) query từ cleaned vector store     │
-└──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            RAW SOURCE                                           │
+│  data/raw/policy_export_dirty.csv                                               │
+│  (10 records: policy_refund, sla_p1, it_faq, hr_leave, legacy_catalog)         │
+│  exported_at = 2026-04-10T08:00:00  ← đây là điểm đo FRESHNESS_INGEST         │
+└──────────────────────────────┬──────────────────────────────────────────────────┘
+                               │ load_raw_csv()
+                               │ log: raw_records=10  [D10-T01]
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                         TRANSFORM / CLEAN                                        │
+│  transform/cleaning_rules.py   (D10-T02: Quach Gia Duoc)                        │
+│                                                                                  │
+│  Rule 1: deduplicate chunk_id               → drop chunk_id=2 (dup of 1)        │
+│  Rule 2: drop empty chunk_text              → drop chunk_id=5 (empty)           │
+│  Rule 3: stale_refund_migration_marker       → quarantine chunk_id=3 (v3 stale) │
+│  Rule 4: hr_stale_version (effective<2026)  → quarantine chunk_id=7 (HR 2025)  │
+│  Rule 5: allowlist doc_id                   → quarantine chunk_id=9 (legacy)   │
+│  Rule 6: effective_date format (ISO only)   → quarantine chunk_id=10 (01/02/..)│
+│                                                                                  │
+│  Output:  cleaned_records=4  │  quarantine_records=6                            │
+│  Files:   artifacts/cleaned/cleaned_<run_id>.csv                                │
+│           artifacts/quarantine/quarantine_<run_id>.csv                           │
+└──────────────────────────────┬───────────────────────────────────────────────────┘
+                               │ run_expectations()
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                         VALIDATE / QUALITY                                       │
+│  quality/expectations.py   (D10-T03: Pham Quoc Dung)                            │
+│                                                                                  │
+│  expectation[min_one_row]                  [halt] :: cleaned_rows=4             │
+│  expectation[no_empty_doc_id]              [halt] :: empty_doc_id_count=0       │
+│  expectation[refund_no_stale_14d_window]   [halt] :: violations=0               │
+│  expectation[effective_date_iso_yyyy_mm_dd][halt] :: non_iso_rows=0             │
+│  expectation[hr_leave_no_stale_10d_annual] [halt] :: violations=0               │
+│  expectation[chunk_min_length_8]           [warn] :: short_chunks=0             │
+│                                                                                  │
+│  → HALT nếu bất kỳ halt-expectation nào fail (pipeline không chạy bước embed)  │
+│  → WARN ghi vào log, pipeline tiếp tục                                          │
+└──────────────────────────────┬───────────────────────────────────────────────────┘
+                               │ cmd_embed_internal()
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                         EMBED / INDEX                                            │
+│  ChromaDB collection: day10_kb   (D10-T05: Hoang Kim Tri Thanh)                 │
+│  Model: all-MiniLM-L6-v2 (CPU-safe)                                             │
+│                                                                                  │
+│  Idempotency:                                                                    │
+│    - Upsert theo chunk_id → rerun 2 lần không tạo duplicate                     │
+│    - Prune: xoá chunk_id có trong collection nhưng không còn trong cleaned      │
+│      → log: embed_prune_removed=N                                                │
+│  Metadata ghi kèm: doc_id, effective_date, run_id                               │
+│                                                                                  │
+│  Output: chroma_db/ (local PersistentClient)                                    │
+└──────────────────────────────┬───────────────────────────────────────────────────┘
+                               │ check_manifest_freshness()
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                         MONITOR / MANIFEST                                       │
+│  monitoring/freshness_check.py   (D10-T05: Hoang Kim Tri Thanh)                 │
+│                                                                                  │
+│  Ghi manifest:  artifacts/manifests/manifest_<run_id>.json                      │
+│    { run_id, raw_records, cleaned_records, quarantine_records,                   │
+│      latest_exported_at, chroma_collection, ... }                                │
+│                                                                                  │
+│  Freshness SLA check (env: FRESHNESS_SLA_HOURS=24):                             │
+│    latest_exported_at vs run_timestamp                                           │
+│    PASS: delta < 12h  │  WARN: 12–24h  │  FAIL: > 24h ← INC-001               │
+│                                                                                  │
+│  Log cuối: PIPELINE_OK  hoặc PIPELINE_HALT                                      │
+└──────────────────────────────┬───────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                     SERVING / GRADING / EVAL                                     │
+│                                                                                  │
+│  eval_retrieval.py  → artifacts/eval/*_eval.csv                                 │
+│  grading_run.py     → artifacts/eval/grading_run.jsonl                          │
+│                                                                                  │
+│  Câu hỏi test (data/test_questions.json):                                        │
+│    q_refund_window: kỳ vọng "7 ngày", forbidden "14 ngày"                       │
+│    q_p1_sla:        kỳ vọng "15 phút / 4 giờ"                                  │
+│    q_lockout:       kỳ vọng "5 lần"                                             │
+│    q_leave_version: kỳ vọng "12 ngày" (2026), top1_doc=hr_leave_policy          │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Điểm đo freshness:** `exported_at` trong CSV (thời điểm upstream export) — không phải thời điểm chạy pipeline.  
+**Ghi run_id:** Tự động từ UTC timestamp hoặc flag `--run-id` → mọi artifact đều mang run_id.
 
 ---
 
-## Các quyết định thiết kế
+## 2. Ranh giới trách nhiệm
 
-### 1. ETL (Transform trước Load) thay vì ELT
-
-**Lý do:** Dữ liệu helpdesk chứa PII tiềm năng và có thể có giá trị sai (priority âm, channel không hợp lệ) làm lệch kết quả retrieval. Việc transform trước khi load vào vector store giúp đảm bảo chỉ dữ liệu sạch mới được embed, tránh vector "rác" trong ChromaDB.
-
-### 2. Batch processing thay vì Streaming
-
-**Lý do:** Khối lượng ticket IT Helpdesk không đủ lớn để cần streaming thời gian thực. Batch theo lịch (ví dụ mỗi 6-12 giờ) đủ đáp ứng SLA freshness 24h. Streaming sẽ tăng độ phức tạp vận hành không cần thiết ở giai đoạn này.
-
-### 3. run_id theo timestamp
-
-**Lý do:** Mỗi lần chạy pipeline được đánh dấu bằng `run_id = YYYYMMDDTHHMMSS`. Điều này cho phép:
-- Rollback về bản sạch của ngày cụ thể nếu phát hiện vấn đề
-- Truy vết lịch sử data quality theo thời gian
-- Idempotency: chạy lại cùng input không ghi đè file cũ
-
-### 4. pass_rate thay vì hard stop
-
-**Lý do:** Thay vì dừng hẳn pipeline khi có lỗi quality, sử dụng `pass_rate` threshold (85%). Nếu < 85%: cảnh báo + ghi log, pipeline vẫn tiếp tục. Điều này tránh downtime hoàn toàn trong production khi chỉ có vấn đề nhỏ.
+| Thành phần | Input | Output | Owner (task_id) |
+|------------|-------|--------|-----------------|
+| **Ingest** | `data/raw/policy_export_dirty.csv` | `rows[]` (list of dicts) | Dang Dinh Tu Anh (D10-T01) |
+| **Transform** | `rows[]` (raw 10 records) | `cleaned[]` (4) + `quarantine[]` (6) | Quach Gia Duoc (D10-T02) |
+| **Quality** | `cleaned[]` | `results[], halt: bool` | Pham Quoc Dung (D10-T03) |
+| **Embed** | `cleaned_*.csv` | ChromaDB collection `day10_kb` | Hoang Kim Tri Thanh (D10-T05) |
+| **Monitor** | manifest JSON | freshness status PASS/WARN/FAIL | Hoang Kim Tri Thanh (D10-T05) |
+| **Docs & Runbook** | tất cả artifacts & logs | 3 docs này + reports | Nguyen Thanh Nam (D10-T04) |
 
 ---
 
-## Liên kết với Day 08 & Day 09
+## 3. Idempotency & rerun
 
-```
-Day 08 RAG Pipeline
-  └── rag_pipeline.py (indexing + retrieval)
-       ↑
-       │ data đã clean
-       │
-Day 10 ETL Pipeline  ──→  data/cleaned/*.csv
-       │
-       │ quality report
-       └──→ artifacts/
+Pipeline sử dụng **upsert theo `chunk_id`** làm key idempotency:
 
-Day 09 Supervisor-Workers
-  └── retrieval_worker.py
-       ↑
-       │ query ChromaDB built từ cleaned data
-```
+- Mỗi `chunk_id` là ID duy nhất trong ChromaDB → `col.upsert(ids=chunk_ids, ...)` không tạo bản ghi trùng.
+- Nếu một chunk bị quarantine trong lần rerun (ví dụ sau khi thêm rule mới), pipeline sẽ **prune** (xoá) chunk đó khỏi collection:
+  ```
+  embed_prune_removed=N   ← log trong artifacts/logs/run_*.log
+  ```
+- Rerun 2 lần với cùng input → số lượng vector trong collection **không thay đổi** sau lần thứ 2.
+
+**Lưu ý:** `cleaned_path` có chứa `run_id` nên mỗi run tạo file cleaned mới — không ghi đè lịch sử.
 
 ---
 
-## Cấu trúc thư mục
+## 4. Liên hệ Day 09
+
+Pipeline Day 10 và Day 09 dùng **chung thư mục `data/docs/`** cho 5 tài liệu nội bộ (policy_refund, sla_p1, access_control, it_faq, hr_leave):
 
 ```
-day10/lab/
-├── etl_pipeline.py              ← Entry point chính
-├── transform/
-│   └── cleaning_rules.py        ← 6 cleaning steps
-├── quality/
-│   └── expectations.py          ← Expectation suite (9 checks)
-├── monitoring/
-│   └── freshness_check.py       ← 5-pillar monitor
-├── data/
-│   ├── raw/                     ← Input: dữ liệu thô (dirty)
-│   └── cleaned/                 ← Output: dữ liệu đã làm sạch
-├── artifacts/
-│   ├── before_after_eval.csv    ← Bằng chứng data quality
-│   ├── quality_report.json      ← Kết quả expectation suite
-│   └── monitor_report.json      ← Kết quả monitor checks
-├── docs/
-│   ├── pipeline_architecture.md ← File này
-│   ├── data_contract.md         ← Hợp đồng schema
-│   └── runbook.md               ← Sổ tay xử lý sự cố
-└── reports/
-    └── individual/
-        └── nguyen_thanh_nam.md  ← Báo cáo cá nhân
+day09/lab/data/docs/   ← Day 09 retrieval workers đọc từ đây (TXT files)
+day10/lab/data/docs/   ← mirror (cùng nội dung)
+day10/lab/data/raw/    ← CSV export mô phỏng lớp ingestion từ DB/API
 ```
+
+Day 10 mô phỏng kịch bản **CSV export từ upstream DB** — khác với Day 09 dùng trực tiếp TXT. Collection `day10_kb` (Chroma) được tạo ra từ CSV cleaned; nếu muốn Day 09 dùng lại, cần đổi `CHROMA_COLLECTION=day10_kb` trong `.env` của Day 09 lab.
 
 ---
 
-## Tech Stack Day 10
+## 5. Rủi ro đã biết
 
-| Layer | Tool |
-|-------|------|
-| Data Processing | Python + pandas |
-| Quality Checks | Custom expectation suite (inspired by Great Expectations) |
-| Monitoring | Custom 5-pillar monitor |
-| Orchestration | Script-based (có thể nâng lên Prefect/Airflow) |
-| Storage | CSV → ChromaDB (embed step) |
+| Rủi ro | Mức | Chi tiết | Owner |
+|--------|-----|---------|-------|
+| Freshness FAIL khi CSV cũ > 24h | CAO | `exported_at=2026-04-10` → delta ≈ 5 ngày; xem INC-001 trong runbook | D10-T04 |
+| Stale refund chunk từ v3 migration | CAO | chunk_id=3 "14 ngày" bị fix bởi `apply_refund_window_fix`; xem INC-002 | D10-T02 |
+| chromadb chưa cài → embed fail | TRUNG | `pip install -r requirements.txt` trước khi chạy | D10-T05 |
+| HR chunk 2025 lọt qua nếu effective_date bị bỏ qua | TRUNG | chunk_id=7 bị filter bởi `hr_stale_version` rule | D10-T02 |
+| Malformed date "01/02/2026" không parse được | THẤP | chunk_id=10 quarantined bởi `effective_date` format rule | D10-T02 |
 
 ---
 
-*Day 10 Lab — AI in Action · VinUniversity · 2026*
+*Day 10 Lab — AI in Action · VinUniversity · 2026 · D10-T04 owner: Nguyễn Thành Nam*
