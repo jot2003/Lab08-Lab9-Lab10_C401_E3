@@ -32,3 +32,39 @@ freshness_check=FAIL {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 
 event_json={"ts": "2026-04-15T08:23:18.152407+00:00", "level": "ERROR", "task_id": "D10-T05", "owner": "Hoang Kim Tri Thanh", "event": "freshness_check", "message": "freshness_check=FAIL {\"latest_exported_at\": \"2026-04-10T08:00:00\", \"age_hours\": 120.388, \"sla_hours\": 24.0, \"reason\": \"freshness_sla_exceeded\"}"}
 PIPELINE_OK
 event_json={"ts": "2026-04-15T08:23:18.153008+00:00", "level": "INFO", "task_id": "D10-T00", "owner": "Hoang Kim Tri Thanh", "event": "run_completed", "message": "PIPELINE_OK"}
+run_id=dung-after-final
+event_json={"ts": "2026-04-15T10:49:34.252815+00:00", "level": "INFO", "task_id": "D10-T00", "owner": "Hoang Kim Tri Thanh", "event": "run_start", "message": "run_id=dung-after-final"}
+raw_records=10
+event_json={"ts": "2026-04-15T10:49:34.252815+00:00", "level": "INFO", "task_id": "D10-T01", "owner": "Dang Dinh Tu Anh", "event": "ingest_raw_count", "message": "raw_records=10"}
+cleaned_records=4
+event_json={"ts": "2026-04-15T10:49:34.254815+00:00", "level": "INFO", "task_id": "D10-T02", "owner": "Quach Gia Duoc", "event": "cleaned_count", "message": "cleaned_records=4"}
+quarantine_records=6
+event_json={"ts": "2026-04-15T10:49:34.254815+00:00", "level": "INFO", "task_id": "D10-T02", "owner": "Quach Gia Duoc", "event": "quarantine_count", "message": "quarantine_records=6"}
+cleaned_csv=artifacts\cleaned\cleaned_dung-after-final.csv
+event_json={"ts": "2026-04-15T10:49:34.255725+00:00", "level": "INFO", "task_id": "D10-T02", "owner": "Quach Gia Duoc", "event": "cleaned_path", "message": "cleaned_csv=artifacts\\cleaned\\cleaned_dung-after-final.csv"}
+quarantine_csv=artifacts\quarantine\quarantine_dung-after-final.csv
+event_json={"ts": "2026-04-15T10:49:34.255906+00:00", "level": "INFO", "task_id": "D10-T02", "owner": "Quach Gia Duoc", "event": "quarantine_path", "message": "quarantine_csv=artifacts\\quarantine\\quarantine_dung-after-final.csv"}
+expectation[min_one_row] OK (halt) :: cleaned_rows=4
+event_json={"ts": "2026-04-15T10:49:34.255906+00:00", "level": "INFO", "task_id": "D10-T03", "owner": "Pham Quoc Dung", "event": "expectation_result", "message": "expectation[min_one_row] OK (halt) :: cleaned_rows=4"}
+expectation[no_empty_doc_id] OK (halt) :: empty_doc_id_count=0
+event_json={"ts": "2026-04-15T10:49:34.255906+00:00", "level": "INFO", "task_id": "D10-T03", "owner": "Pham Quoc Dung", "event": "expectation_result", "message": "expectation[no_empty_doc_id] OK (halt) :: empty_doc_id_count=0"}
+expectation[refund_no_stale_14d_window] OK (halt) :: violations=0
+event_json={"ts": "2026-04-15T10:49:34.255906+00:00", "level": "INFO", "task_id": "D10-T03", "owner": "Pham Quoc Dung", "event": "expectation_result", "message": "expectation[refund_no_stale_14d_window] OK (halt) :: violations=0"}
+expectation[chunk_min_length_8] OK (warn) :: short_chunks=0
+event_json={"ts": "2026-04-15T10:49:34.256908+00:00", "level": "INFO", "task_id": "D10-T03", "owner": "Pham Quoc Dung", "event": "expectation_result", "message": "expectation[chunk_min_length_8] OK (warn) :: short_chunks=0"}
+expectation[effective_date_iso_yyyy_mm_dd] OK (halt) :: non_iso_rows=0
+event_json={"ts": "2026-04-15T10:49:34.256908+00:00", "level": "INFO", "task_id": "D10-T03", "owner": "Pham Quoc Dung", "event": "expectation_result", "message": "expectation[effective_date_iso_yyyy_mm_dd] OK (halt) :: non_iso_rows=0"}
+expectation[hr_leave_no_stale_10d_annual] OK (halt) :: violations=0
+event_json={"ts": "2026-04-15T10:49:34.256908+00:00", "level": "INFO", "task_id": "D10-T03", "owner": "Pham Quoc Dung", "event": "expectation_result", "message": "expectation[hr_leave_no_stale_10d_annual] OK (halt) :: violations=0"}
+embed_source csv_chunks=4 txt_chunks=75
+event_json={"ts": "2026-04-15T10:49:35.446839+00:00", "level": "INFO", "task_id": "D10-T05", "owner": "Hoang Kim Tri Thanh", "event": "embed_source_count", "message": "embed_source csv_chunks=4 txt_chunks=75"}
+embed_prune_removed=5
+event_json={"ts": "2026-04-15T10:49:46.037472+00:00", "level": "INFO", "task_id": "D10-T05", "owner": "Hoang Kim Tri Thanh", "event": "embed_prune_removed", "message": "embed_prune_removed=5"}
+embed_upsert total=79 (csv=4, txt=75) collection=day10_kb
+event_json={"ts": "2026-04-15T10:49:46.940399+00:00", "level": "INFO", "task_id": "D10-T05", "owner": "Hoang Kim Tri Thanh", "event": "embed_upsert", "message": "embed_upsert total=79 (csv=4, txt=75) collection=day10_kb"}
+manifest_written=artifacts\manifests\manifest_dung-after-final.json
+event_json={"ts": "2026-04-15T10:49:46.941400+00:00", "level": "INFO", "task_id": "D10-T05", "owner": "Hoang Kim Tri Thanh", "event": "manifest_written", "message": "manifest_written=artifacts\\manifests\\manifest_dung-after-final.json"}
+freshness_check=FAIL {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 122.83, "sla_hours": 24.0, "reason": "freshness_sla_exceeded"}
+event_json={"ts": "2026-04-15T10:49:46.948996+00:00", "level": "ERROR", "task_id": "D10-T05", "owner": "Hoang Kim Tri Thanh", "event": "freshness_check", "message": "freshness_check=FAIL {\"latest_exported_at\": \"2026-04-10T08:00:00\", \"age_hours\": 122.83, \"sla_hours\": 24.0, \"reason\": \"freshness_sla_exceeded\"}"}
+PIPELINE_OK
+event_json={"ts": "2026-04-15T10:49:46.948996+00:00", "level": "INFO", "task_id": "D10-T00", "owner": "Hoang Kim Tri Thanh", "event": "run_completed", "message": "PIPELINE_OK"}
