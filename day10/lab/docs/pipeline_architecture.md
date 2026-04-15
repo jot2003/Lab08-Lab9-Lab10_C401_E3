@@ -24,7 +24,7 @@
 │                                                                                  │
 │  Rule 1: deduplicate chunk_id               → drop chunk_id=2 (dup of 1)        │
 │  Rule 2: drop empty chunk_text              → drop chunk_id=5 (empty)           │
-│  Rule 3: refund_window_fix (14→7 ngày)      → quarantine chunk_id=3 (v3 stale) │
+│  Rule 3: stale_refund_migration_marker       → quarantine chunk_id=3 (v3 stale) │
 │  Rule 4: hr_stale_version (effective<2026)  → quarantine chunk_id=7 (HR 2025)  │
 │  Rule 5: allowlist doc_id                   → quarantine chunk_id=9 (legacy)   │
 │  Rule 6: effective_date format (ISO only)   → quarantine chunk_id=10 (01/02/..)│
@@ -39,12 +39,14 @@
 │                         VALIDATE / QUALITY                                       │
 │  quality/expectations.py   (D10-T03: Pham Quoc Dung)                            │
 │                                                                                  │
-│  Expectation 1 [warn]:  chunk_text không rỗng                                   │
-│  Expectation 2 [warn]:  effective_date phải là ISO-8601                          │
-│  Expectation 3 [halt]:  doc_id nằm trong allowlist                              │
-│  Expectation 4 [halt]:  không còn chunk có "14 ngày" + "hoàn tiền"             │
+│  expectation[min_one_row]                  [halt] :: cleaned_rows=4             │
+│  expectation[no_empty_doc_id]              [halt] :: empty_doc_id_count=0       │
+│  expectation[refund_no_stale_14d_window]   [halt] :: violations=0               │
+│  expectation[effective_date_iso_yyyy_mm_dd][halt] :: non_iso_rows=0             │
+│  expectation[hr_leave_no_stale_10d_annual] [halt] :: violations=0               │
+│  expectation[chunk_min_length_8]           [warn] :: short_chunks=0             │
 │                                                                                  │
-│  → HALT nếu bất kỳ halt-expectation nào fail                                    │
+│  → HALT nếu bất kỳ halt-expectation nào fail (pipeline không chạy bước embed)  │
 │  → WARN ghi vào log, pipeline tiếp tục                                          │
 └──────────────────────────────┬───────────────────────────────────────────────────┘
                                │ cmd_embed_internal()

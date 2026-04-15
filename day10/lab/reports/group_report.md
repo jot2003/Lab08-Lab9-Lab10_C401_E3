@@ -65,22 +65,22 @@ Quarantine: `artifacts/quarantine/quarantine_dung-after-final.csv`
 | `effective_date_iso` (reject date format sai) | chunk_id=10 `effective_date=01/02/2026` (DD/MM/YYYY) có thể gây lỗi downstream | chunk_id=10 quarantined | `quarantine_d10-c3.csv` |
 | `no_empty_chunk` (reject text rỗng) | chunk_id=5 text="" lọt vào index | chunk_id=5 quarantined | log `event_json` rule `empty_text` |
 | Expectation `doc_id_in_allowlist` [halt] | Khi inject: halt nếu doc_id lạ lọt qua | Sau clean: pass vì chunk 9 đã bị rule filter trước | `artifacts/logs/run_dung-after-final.log` |
-| Expectation `no_stale_refund` [halt] | Khi `--no-refund-fix`: FAIL → halt | Sau fix: PASS | log `expectation[no_stale_refund] OK` |
+| Expectation `refund_no_stale_14d_window` [halt] | Khi inject: chunk "14 ngày" vào cleaned → FAIL → halt | Sau clean: `violations=0` → PASS | log `expectation[refund_no_stale_14d_window] OK (halt) :: violations=0` |
 
-**Rule chính (baseline + mở rộng):**
-- `deduplicate_chunk_id`: xoá chunk trùng ID, giữ dòng đầu tiên
-- `drop_empty_text`: quarantine chunk có `chunk_text` rỗng hoặc null
-- `refund_window_fix`: quarantine chunk có "14 ngày" kết hợp "hoàn tiền" (stale v3)
-- `hr_stale_version`: quarantine chunk HR có `effective_date` < 2026-01-01
-- `allowlist_doc_id`: quarantine doc_id không nằm trong `{policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy, access_control_sop}`
-- `effective_date_iso`: quarantine dòng có `effective_date` không parse được theo ISO 8601
+**Rule chính (reason code từ `transform/cleaning_rules.py`):**
+- `unknown_doc_id`: quarantine doc_id không trong allowlist `{policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy}`
+- `missing_chunk_text`: quarantine chunk có `chunk_text` rỗng hoặc null
+- `stale_refund_migration_marker`: quarantine chunk refund chứa "bản sync cũ" hoặc "policy-v3"
+- `stale_hr_policy_effective_date`: quarantine chunk HR có `effective_date` < 2026-01-01
+- `duplicate_chunk_text`: quarantine chunk trùng nội dung text (giữ bản đầu)
+- `non_iso_effective_date_source`: quarantine dòng có `effective_date` không theo ISO YYYY-MM-DD
 
 **Ví dụ 1 lần expectation fail:**
 
-Khi chạy `python etl_pipeline.py run --no-refund-fix --skip-validate`, log ghi:
+Khi chạy pipeline với inject scenario (chunk stale lọt qua cleaning), log ghi:
 ```
-expectation[no_stale_refund] FAIL (halt) :: chunk_id=3 vẫn còn trong cleaned
-WARN: expectation failed but --skip-validate → tiếp tục embed (chỉ dùng cho demo Sprint 3).
+expectation[refund_no_stale_14d_window] FAIL (halt) :: violations=1
+WARN: expectation failed → pipeline HALT trước bước embed
 ```
 → Kết quả eval: `q_refund_window` → `hits_forbidden=yes` (bằng chứng inject hoạt động đúng).
 
