@@ -185,13 +185,81 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _split_into_paragraphs(text: str, min_len: int = 40) -> list:
+    """
+    Two-pass splitter:
+    1. Blank-line paragraphs + sub-section markers (P1/P2, Level, 1.x).
+    2. Within paragraphs that contain 3+ bullet lines, split at bullet level
+       so individual facts (e.g. "18 ngay/nam") get their own chunk.
+    Chunks shorter than min_len are merged upward.
+    """
+    import re
+
+    SUBSEC_RE = re.compile(
+        r'^(?:Ticket P\d|Level \d|P\d —|\d+\.\d+\s|\d+\.\s|Bước \d|Step \d|Q:)',
+        re.MULTILINE | re.IGNORECASE,
+    )
+    BULLET_RE = re.compile(r'^[-•]\s', re.MULTILINE)
+
+    # Pass 1: blank-line + sub-section split
+    raw_paras = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
+    pass1: list = []
+    for para in raw_paras:
+        lines = para.splitlines()
+        current: list = []
+        for line in lines:
+            if current and SUBSEC_RE.match(line.strip()):
+                candidate = '\n'.join(current).strip()
+                if len(candidate) >= min_len:
+                    pass1.append(candidate)
+                current = [line]
+            else:
+                current.append(line)
+        if current:
+            candidate = '\n'.join(current).strip()
+            if len(candidate) >= min_len:
+                pass1.append(candidate)
+
+    # Pass 2: bullet-level split for list-heavy paragraphs (>= 3 bullets)
+    chunks: list = []
+    for para in pass1:
+        bullet_lines = BULLET_RE.findall(para)
+        if len(bullet_lines) >= 5:
+            # Split at each bullet, keep the "header" line before first bullet
+            lines = para.splitlines()
+            header_lines: list = []
+            i = 0
+            while i < len(lines) and not BULLET_RE.match(lines[i]):
+                header_lines.append(lines[i])
+                i += 1
+            header = '\n'.join(header_lines).strip()
+            current_bullet: list = []
+            while i < len(lines):
+                line = lines[i]
+                if BULLET_RE.match(line) and current_bullet:
+                    bullet_text = (header + '\n' + '\n'.join(current_bullet)).strip()
+                    if len(bullet_text) >= min_len:
+                        chunks.append(bullet_text)
+                    current_bullet = [line]
+                else:
+                    current_bullet.append(line)
+                i += 1
+            if current_bullet:
+                bullet_text = (header + '\n' + '\n'.join(current_bullet)).strip()
+                if len(bullet_text) >= min_len:
+                    chunks.append(bullet_text)
+        else:
+            chunks.append(para)
+
+    if not chunks and len(text.strip()) >= min_len:
+        chunks = [text.strip()]
+    return chunks
+
+
 def _load_txt_chunks(docs_dir, run_id):
     """
-    Read .txt files in docs_dir, split by section (=== ... ===), return
-    (ids, documents, metadatas) ready for ChromaDB upsert.
-
-    Each section becomes its own chunk — prevents fact contamination when
-    multiple figures (e.g. 15 phut + 4 gio) share a single chunk.
+    Read .txt files in docs_dir, split section → paragraph → bullet.
+    Returns (ids, documents, metadatas) for ChromaDB upsert.
     """
     import hashlib
     ids, documents, metadatas = [], [], []
@@ -200,40 +268,40 @@ def _load_txt_chunks(docs_dir, run_id):
         doc_id = txt_file.stem
         content = txt_file.read_text(encoding="utf-8")
 
-        # Split on "===" — results alternate: header, title, body, title, body ...
         parts = [s.strip() for s in content.split("===")]
 
-        chunks = []
-        # Header block (before first ===)
+        section_chunks: list = []
         if parts and len(parts[0]) >= 20:
-            chunks.append(parts[0])
-
+            section_chunks.append(("header", parts[0]))
         i = 1
         while i + 1 < len(parts):
             title = parts[i].strip()
             body = parts[i + 1].strip()
             combined = f"{title}\n{body}" if title and body else (title or body)
             if len(combined) >= 20:
-                chunks.append(combined)
+                section_chunks.append((title, combined))
             i += 2
 
-        # Fallback: whole file as one chunk
-        if not chunks and len(content.strip()) >= 20:
-            chunks = [content.strip()]
+        if not section_chunks and len(content.strip()) >= 20:
+            section_chunks = [("full", content.strip())]
 
-        for seq, chunk_text in enumerate(chunks):
-            h = hashlib.sha256(f"{doc_id}|{seq}|{chunk_text}".encode()).hexdigest()[:12]
-            ids.append(f"txt__{doc_id}__s{seq}__{h}")
-            documents.append(chunk_text)
-            metadatas.append({
-                "doc_id": doc_id,
-                "source": "docs_txt",
-                "section_seq": seq,
-                "run_id": run_id,
-            })
+        seq = 0
+        for sec_title, sec_text in section_chunks:
+            paras = _split_into_paragraphs(sec_text)
+            for para in paras:
+                h = hashlib.sha256(f"{doc_id}|{seq}|{para}".encode()).hexdigest()[:12]
+                ids.append(f"txt__{doc_id}__s{seq}__{h}")
+                documents.append(para)
+                metadatas.append({
+                    "doc_id": doc_id,
+                    "section": sec_title[:60],
+                    "source": "docs_txt",
+                    "section_seq": seq,
+                    "run_id": run_id,
+                })
+                seq += 1
 
     return ids, documents, metadatas
-
 
 def cmd_embed_internal(cleaned_csv: Path, *, run_id: str, log) -> bool:
     try:
