@@ -185,13 +185,131 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _split_into_paragraphs(text: str, min_len: int = 40) -> list:
+    """
+    Two-pass splitter:
+    1. Blank-line paragraphs + sub-section markers (P1/P2, Level, 1.x).
+    2. Within paragraphs that contain 3+ bullet lines, split at bullet level
+       so individual facts (e.g. "18 ngay/nam") get their own chunk.
+    Chunks shorter than min_len are merged upward.
+    """
+    import re
+
+    SUBSEC_RE = re.compile(
+        r'^(?:Ticket P\d|Level \d|P\d —|\d+\.\d+\s|\d+\.\s|Bước \d|Step \d|Q:)',
+        re.MULTILINE | re.IGNORECASE,
+    )
+    BULLET_RE = re.compile(r'^[-•]\s', re.MULTILINE)
+
+    # Pass 1: blank-line + sub-section split
+    raw_paras = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
+    pass1: list = []
+    for para in raw_paras:
+        lines = para.splitlines()
+        current: list = []
+        for line in lines:
+            if current and SUBSEC_RE.match(line.strip()):
+                candidate = '\n'.join(current).strip()
+                if len(candidate) >= min_len:
+                    pass1.append(candidate)
+                current = [line]
+            else:
+                current.append(line)
+        if current:
+            candidate = '\n'.join(current).strip()
+            if len(candidate) >= min_len:
+                pass1.append(candidate)
+
+    # Pass 2: bullet-level split for list-heavy paragraphs (>= 3 bullets)
+    chunks: list = []
+    for para in pass1:
+        bullet_lines = BULLET_RE.findall(para)
+        if len(bullet_lines) >= 5:
+            # Split at each bullet, keep the "header" line before first bullet
+            lines = para.splitlines()
+            header_lines: list = []
+            i = 0
+            while i < len(lines) and not BULLET_RE.match(lines[i]):
+                header_lines.append(lines[i])
+                i += 1
+            header = '\n'.join(header_lines).strip()
+            current_bullet: list = []
+            while i < len(lines):
+                line = lines[i]
+                if BULLET_RE.match(line) and current_bullet:
+                    bullet_text = (header + '\n' + '\n'.join(current_bullet)).strip()
+                    if len(bullet_text) >= min_len:
+                        chunks.append(bullet_text)
+                    current_bullet = [line]
+                else:
+                    current_bullet.append(line)
+                i += 1
+            if current_bullet:
+                bullet_text = (header + '\n' + '\n'.join(current_bullet)).strip()
+                if len(bullet_text) >= min_len:
+                    chunks.append(bullet_text)
+        else:
+            chunks.append(para)
+
+    if not chunks and len(text.strip()) >= min_len:
+        chunks = [text.strip()]
+    return chunks
+
+
+def _load_txt_chunks(docs_dir, run_id):
+    """
+    Read .txt files in docs_dir, split section → paragraph → bullet.
+    Returns (ids, documents, metadatas) for ChromaDB upsert.
+    """
+    import hashlib
+    ids, documents, metadatas = [], [], []
+
+    for txt_file in sorted(docs_dir.glob("*.txt")):
+        doc_id = txt_file.stem
+        content = txt_file.read_text(encoding="utf-8")
+
+        parts = [s.strip() for s in content.split("===")]
+
+        section_chunks: list = []
+        if parts and len(parts[0]) >= 20:
+            section_chunks.append(("header", parts[0]))
+        i = 1
+        while i + 1 < len(parts):
+            title = parts[i].strip()
+            body = parts[i + 1].strip()
+            combined = f"{title}\n{body}" if title and body else (title or body)
+            if len(combined) >= 20:
+                section_chunks.append((title, combined))
+            i += 2
+
+        if not section_chunks and len(content.strip()) >= 20:
+            section_chunks = [("full", content.strip())]
+
+        seq = 0
+        for sec_title, sec_text in section_chunks:
+            paras = _split_into_paragraphs(sec_text)
+            for para in paras:
+                h = hashlib.sha256(f"{doc_id}|{seq}|{para}".encode()).hexdigest()[:12]
+                ids.append(f"txt__{doc_id}__s{seq}__{h}")
+                documents.append(para)
+                metadatas.append({
+                    "doc_id": doc_id,
+                    "section": sec_title[:60],
+                    "source": "docs_txt",
+                    "section_seq": seq,
+                    "run_id": run_id,
+                })
+                seq += 1
+
+    return ids, documents, metadatas
+
 def cmd_embed_internal(cleaned_csv: Path, *, run_id: str, log) -> bool:
     try:
         import chromadb
         from chromadb.utils import embedding_functions
     except ImportError:
         log(
-            "ERROR: chromadb chưa cài. pip install -r requirements.txt",
+            "ERROR: chromadb chua cai. pip install -r requirements.txt",
             task_id="D10-T05",
             level="ERROR",
             event="embed_import_error",
@@ -202,28 +320,54 @@ def cmd_embed_internal(cleaned_csv: Path, *, run_id: str, log) -> bool:
     collection_name = os.environ.get("CHROMA_COLLECTION", "day10_kb")
     model_name = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
-    from transform.cleaning_rules import load_raw_csv as load_csv  # same loader
+    from transform.cleaning_rules import load_raw_csv as load_csv
 
     rows = load_csv(cleaned_csv)
     if not rows:
         log(
-            "WARN: cleaned CSV rỗng — không embed.",
+            "WARN: cleaned CSV rong - khong embed.",
             task_id="D10-T05",
             level="WARN",
             event="embed_empty_cleaned_csv",
         )
         return True
 
+    # --- chunks from cleaned CSV ---
+    csv_ids = [r["chunk_id"] for r in rows]
+    csv_docs = [r["chunk_text"] for r in rows]
+    csv_metas = [
+        {
+            "doc_id": r.get("doc_id", ""),
+            "effective_date": r.get("effective_date", ""),
+            "source": "cleaned_csv",
+            "run_id": run_id,
+        }
+        for r in rows
+    ]
+
+    # --- chunks from .txt docs (full corpus) ---
+    docs_dir = ROOT / "data" / "docs"
+    txt_ids, txt_docs, txt_metas = _load_txt_chunks(docs_dir, run_id)
+
+    log(
+        f"embed_source csv_chunks={len(csv_ids)} txt_chunks={len(txt_ids)}",
+        task_id="D10-T05",
+        event="embed_source_count",
+    )
+
+    all_ids = csv_ids + txt_ids
+    all_docs = csv_docs + txt_docs
+    all_metas = csv_metas + txt_metas
+
     client = chromadb.PersistentClient(path=db_path)
     emb = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
     col = client.get_or_create_collection(name=collection_name, embedding_function=emb)
 
-    ids = [r["chunk_id"] for r in rows]
-    # Tránh “mồi cũ” trong top-k: xóa id không còn trong cleaned run này (index = snapshot publish).
+    # Prune stale ids not in this run
     try:
         prev = col.get(include=[])
         prev_ids = set(prev.get("ids") or [])
-        drop = sorted(prev_ids - set(ids))
+        drop = sorted(prev_ids - set(all_ids))
         if drop:
             col.delete(ids=drop)
             log(
@@ -238,24 +382,14 @@ def cmd_embed_internal(cleaned_csv: Path, *, run_id: str, log) -> bool:
             level="WARN",
             event="embed_prune_skipped",
         )
-    documents = [r["chunk_text"] for r in rows]
-    metadatas = [
-        {
-            "doc_id": r.get("doc_id", ""),
-            "effective_date": r.get("effective_date", ""),
-            "run_id": run_id,
-        }
-        for r in rows
-    ]
-    # Idempotent: upsert theo chunk_id
-    col.upsert(ids=ids, documents=documents, metadatas=metadatas)
+
+    col.upsert(ids=all_ids, documents=all_docs, metadatas=all_metas)
     log(
-        f"embed_upsert count={len(ids)} collection={collection_name}",
+        f"embed_upsert total={len(all_ids)} (csv={len(csv_ids)}, txt={len(txt_ids)}) collection={collection_name}",
         task_id="D10-T05",
         event="embed_upsert",
     )
     return True
-
 
 def cmd_freshness(args: argparse.Namespace) -> int:
     p = Path(args.manifest)

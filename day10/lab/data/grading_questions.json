@@ -1,0 +1,56 @@
+[
+  {
+    "id": "gq_d10_01",
+    "question": "Khach hang co bao nhieu ngay de yeu cau hoan tien ke tu khi xac nhan don?",
+    "must_contain_any": [
+      "7 ngày",
+      "7 ngày làm việc",
+      "7 ngay",
+      "7 ngay lam viec"
+    ],
+    "must_not_contain": [
+      "14 ngày",
+      "14 ngày làm việc",
+      "14 ngay",
+      "14 ngay lam viec"
+    ],
+    "grading_criteria": [
+      "contains_expected=true",
+      "hits_forbidden=false"
+    ]
+  },
+  {
+    "id": "gq_d10_02",
+    "question": "SLA phan hoi dau tien cho ticket P1 la bao lau?",
+    "must_contain_any": [
+      "15 phút",
+      "4 giờ",
+      "15 phut",
+      "4 gio"
+    ],
+    "must_not_contain": [],
+    "grading_criteria": [
+      "contains_expected=true"
+    ]
+  },
+  {
+    "id": "gq_d10_03",
+    "question": "Theo chinh sach nghi phep hien hanh (2026), nhan vien duoi 3 nam kinh nghiem duoc bao nhieu ngay phep nam?",
+    "must_contain_any": [
+      "12 ngày",
+      "12 ngay"
+    ],
+    "must_not_contain": [
+      "10 ngày phép năm",
+      "10 ngay phep nam",
+      "10 ngày làm việc kể từ",
+      "10 ngay lam viec ke tu"
+    ],
+    "expect_top1_doc_id": "hr_leave_policy",
+    "grading_criteria": [
+      "contains_expected=true",
+      "hits_forbidden=false",
+      "top1_doc_matches=true"
+    ]
+  }
+]
