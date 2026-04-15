@@ -185,13 +185,63 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_txt_chunks(docs_dir, run_id):
+    """
+    Read .txt files in docs_dir, split by section (=== ... ===), return
+    (ids, documents, metadatas) ready for ChromaDB upsert.
+
+    Each section becomes its own chunk — prevents fact contamination when
+    multiple figures (e.g. 15 phut + 4 gio) share a single chunk.
+    """
+    import hashlib
+    ids, documents, metadatas = [], [], []
+
+    for txt_file in sorted(docs_dir.glob("*.txt")):
+        doc_id = txt_file.stem
+        content = txt_file.read_text(encoding="utf-8")
+
+        # Split on "===" — results alternate: header, title, body, title, body ...
+        parts = [s.strip() for s in content.split("===")]
+
+        chunks = []
+        # Header block (before first ===)
+        if parts and len(parts[0]) >= 20:
+            chunks.append(parts[0])
+
+        i = 1
+        while i + 1 < len(parts):
+            title = parts[i].strip()
+            body = parts[i + 1].strip()
+            combined = f"{title}\n{body}" if title and body else (title or body)
+            if len(combined) >= 20:
+                chunks.append(combined)
+            i += 2
+
+        # Fallback: whole file as one chunk
+        if not chunks and len(content.strip()) >= 20:
+            chunks = [content.strip()]
+
+        for seq, chunk_text in enumerate(chunks):
+            h = hashlib.sha256(f"{doc_id}|{seq}|{chunk_text}".encode()).hexdigest()[:12]
+            ids.append(f"txt__{doc_id}__s{seq}__{h}")
+            documents.append(chunk_text)
+            metadatas.append({
+                "doc_id": doc_id,
+                "source": "docs_txt",
+                "section_seq": seq,
+                "run_id": run_id,
+            })
+
+    return ids, documents, metadatas
+
+
 def cmd_embed_internal(cleaned_csv: Path, *, run_id: str, log) -> bool:
     try:
         import chromadb
         from chromadb.utils import embedding_functions
     except ImportError:
         log(
-            "ERROR: chromadb chưa cài. pip install -r requirements.txt",
+            "ERROR: chromadb chua cai. pip install -r requirements.txt",
             task_id="D10-T05",
             level="ERROR",
             event="embed_import_error",
@@ -202,28 +252,54 @@ def cmd_embed_internal(cleaned_csv: Path, *, run_id: str, log) -> bool:
     collection_name = os.environ.get("CHROMA_COLLECTION", "day10_kb")
     model_name = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
-    from transform.cleaning_rules import load_raw_csv as load_csv  # same loader
+    from transform.cleaning_rules import load_raw_csv as load_csv
 
     rows = load_csv(cleaned_csv)
     if not rows:
         log(
-            "WARN: cleaned CSV rỗng — không embed.",
+            "WARN: cleaned CSV rong - khong embed.",
             task_id="D10-T05",
             level="WARN",
             event="embed_empty_cleaned_csv",
         )
         return True
 
+    # --- chunks from cleaned CSV ---
+    csv_ids = [r["chunk_id"] for r in rows]
+    csv_docs = [r["chunk_text"] for r in rows]
+    csv_metas = [
+        {
+            "doc_id": r.get("doc_id", ""),
+            "effective_date": r.get("effective_date", ""),
+            "source": "cleaned_csv",
+            "run_id": run_id,
+        }
+        for r in rows
+    ]
+
+    # --- chunks from .txt docs (full corpus) ---
+    docs_dir = ROOT / "data" / "docs"
+    txt_ids, txt_docs, txt_metas = _load_txt_chunks(docs_dir, run_id)
+
+    log(
+        f"embed_source csv_chunks={len(csv_ids)} txt_chunks={len(txt_ids)}",
+        task_id="D10-T05",
+        event="embed_source_count",
+    )
+
+    all_ids = csv_ids + txt_ids
+    all_docs = csv_docs + txt_docs
+    all_metas = csv_metas + txt_metas
+
     client = chromadb.PersistentClient(path=db_path)
     emb = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
     col = client.get_or_create_collection(name=collection_name, embedding_function=emb)
 
-    ids = [r["chunk_id"] for r in rows]
-    # Tránh “mồi cũ” trong top-k: xóa id không còn trong cleaned run này (index = snapshot publish).
+    # Prune stale ids not in this run
     try:
         prev = col.get(include=[])
         prev_ids = set(prev.get("ids") or [])
-        drop = sorted(prev_ids - set(ids))
+        drop = sorted(prev_ids - set(all_ids))
         if drop:
             col.delete(ids=drop)
             log(
@@ -238,24 +314,14 @@ def cmd_embed_internal(cleaned_csv: Path, *, run_id: str, log) -> bool:
             level="WARN",
             event="embed_prune_skipped",
         )
-    documents = [r["chunk_text"] for r in rows]
-    metadatas = [
-        {
-            "doc_id": r.get("doc_id", ""),
-            "effective_date": r.get("effective_date", ""),
-            "run_id": run_id,
-        }
-        for r in rows
-    ]
-    # Idempotent: upsert theo chunk_id
-    col.upsert(ids=ids, documents=documents, metadatas=metadatas)
+
+    col.upsert(ids=all_ids, documents=all_docs, metadatas=all_metas)
     log(
-        f"embed_upsert count={len(ids)} collection={collection_name}",
+        f"embed_upsert total={len(all_ids)} (csv={len(csv_ids)}, txt={len(txt_ids)}) collection={collection_name}",
         task_id="D10-T05",
         event="embed_upsert",
     )
     return True
-
 
 def cmd_freshness(args: argparse.Namespace) -> int:
     p = Path(args.manifest)
