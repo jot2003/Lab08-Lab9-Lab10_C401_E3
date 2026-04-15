@@ -1,125 +1,46 @@
-# Data Contract — IT Helpdesk Tickets
-> Day 10 Lab · Trợ lý IT nội bộ CS + IT Helpdesk
+# Data contract — Lab Day 10
+
+> Bắt đầu từ `contracts/data_contract.yaml` — mở rộng và đồng bộ file này.
 
 ---
 
-## Giới thiệu
+## 1. Nguồn dữ liệu (source map)
 
-Data contract là bản thoả thuận giữa **producer** (hệ thống ghi ticket) và **consumer** (ETL pipeline + RAG agent) về schema, kiểu dữ liệu, ràng buộc và SLA. Contract này được kiểm tra tự động mỗi lần pipeline chạy qua `quality/expectations.py`.
-
----
-
-## Dataset: `helpdesk_tickets`
-
-**Source:** Hệ thống IT Helpdesk nội bộ (CSV export)  
-**Owner:** IT Support Team  
-**Consumer:** ETL Pipeline → Vector Store → RAG Agent  
-**Frequency:** Export hàng ngày (batch), tối thiểu 1 lần/24h  
+| Nguồn | Phương thức ingest | Failure mode chính | Metric / alert |
+|-------|-------------------|-------------------|----------------|
+| `data/raw/policy_export_dirty.csv` — Export DB nội bộ (policy_refund_v4, sla_p1_2026) | Batch CSV export từ hệ thống quản lý chính sách, lên lịch mỗi 24h | **Stale window bug**: chunk `policy_refund_v4` chứa cửa sổ 14 ngày (lệch v4 = 7 ngày) do migration nhầm từ v3; chunk rỗng (`chunk_text` empty); ngày `effective_date` dưới dạng DD/MM/YYYY thay vì ISO-8601 | `no_stale_refund_window` (severity=halt) → pipeline dừng; `row_quarantine_rate > 30%` → alert Slack #data-ops; freshness SLA 24h |
+| `data/docs/hr_leave_policy.txt` — Tài liệu HR policy (hr_leave_policy) | Ingest thủ công từ file text nội bộ, được đưa vào CSV export qua script sync | **Version conflict**: tồn tại đồng thời bản HR 2025 (10 ngày phép) và HR 2026 (12 ngày phép) trong cùng một export; effective_date < 2026-01-01 bị giữ lại nhầm | `duplicate_chunk_text` trên cùng `doc_id` (severity=warn); `hr_leave_min_effective_date` check: mọi chunk `hr_leave_policy` phải có `effective_date >= 2026-01-01`; bản cũ bị quarantine |
+| `data/docs/it_helpdesk_faq.txt` — IT Helpdesk FAQ (it_helpdesk_faq) | Ingest thủ công từ file text, xuất qua batch export | **Định dạng ngày sai**: `effective_date` = `01/02/2026` (DD/MM/YYYY) thay vì `2026-02-01`; dẫn đến parse error khi validate schema | `date_format_error_count` — số bản ghi có `effective_date` không hợp lệ; bản lỗi bị quarantine; alert nếu `date_format_error_count > 0` |
 
 ---
 
-## Schema Contract
+## 2. Schema cleaned
 
-| Cột | Kiểu | Bắt buộc | Giá trị hợp lệ | Ví dụ |
-|-----|------|----------|----------------|-------|
-| `ticket_id` | string | **Có** | Format TKT-\d+ | `TKT-001` |
-| `message` | string | **Có** | Không null, không rỗng | `"Không truy cập được email"` |
-| `timestamp` | datetime | **Có** | ISO 8601 (`YYYY-MM-DD HH:MM:SS`) | `2026-04-14 09:00:00` |
-| `channel` | string | **Có** | `email` \| `chat` \| `phone` | `email` |
-| `priority` | string | **Có** | `low` \| `medium` \| `high` | `high` |
-| `resolution_minutes` | integer | Không | [0, 10080] (max 7 ngày) | `45` |
-
----
-
-## Ràng buộc (Constraints)
-
-### Uniqueness
-- `ticket_id` phải là duy nhất trong mỗi batch
-- Nếu phát hiện duplicate: **giữ bản đầu tiên, xoá các bản sau**
-
-### Completeness
-- `ticket_id` và `message`: **không được null** — dòng thiếu hai trường này sẽ bị xoá
-- `timestamp`, `channel`, `priority`: null được phép nhưng **cần được flag** trong quality report
-
-### Validity
-- `channel`: chỉ nhận `email`, `chat`, `phone` (lowercase)
-  - Các biến thể không hợp lệ: `EMAIL`, `E-MAIL`, `Chat` → chuẩn hoá hoặc xoá
-- `priority`: chỉ nhận `low`, `medium`, `high`
-  - Mapping: `urgent` → `high`, `critical` → `high`
-  - Các giá trị khác → flag là invalid
-- `resolution_minutes`: phải >= 0 và <= 10080
-  - Giá trị âm → đặt về `NULL` (không xoá dòng)
-  - Giá trị > 10080 → đặt về `NULL`
-
-### Timeliness (Freshness SLA)
-- Dữ liệu **mới nhất** trong batch không được cũ hơn **48 giờ**
-- WARN: cũ hơn **24 giờ**
-- FAIL: cũ hơn **48 giờ**
+| Cột | Kiểu | Bắt buộc | Ghi chú |
+|-----|------|----------|---------|
+| chunk_id | string | Có | ID ổn định sau clean — thường là số thứ tự hoặc hash dạng `doc_id + seq`; dùng làm primary key khi upsert vào ChromaDB |
+| doc_id | string | Có | Khóa logic tài liệu nguồn (vd `policy_refund_v4`, `hr_leave_policy`); phải nằm trong `allowed_doc_ids` của `data_contract.yaml` — nếu không → quarantine |
+| chunk_text | string | Có | Nội dung văn bản của chunk sau clean; tối thiểu 8 ký tự (expectation `chunk_min_length_8`, severity=warn); chunk rỗng hoặc quá ngắn → quarantine |
+| effective_date | date (ISO-8601 `YYYY-MM-DD`) | Có | Ngày hiệu lực của tài liệu nguồn; phải đúng format ISO-8601 sau clean (expectation `effective_date_iso_yyyy_mm_dd`, severity=halt); bản ghi sai format (vd `01/02/2026`) → quarantine trước khi clean |
+| exported_at | datetime (ISO-8601) | Có | Timestamp lúc record được export từ hệ thống nguồn; dùng để tính freshness SLA (mặc định 24h); giá trị `max(exported_at)` trong cleaned run được ghi vào manifest |
 
 ---
 
-## Quy tắc làm sạch (Cleaning Rules)
+## 3. Quy tắc quarantine vs drop
 
-Được implement trong `transform/cleaning_rules.py`:
-
-```
-1. parse_timestamps      → str → datetime, parse error → NULL
-2. normalize_channel     → lowercase + map về allowed set
-3. normalize_priority    → lowercase + map urgent/critical → high
-4. fix_resolution_time   → âm hoặc > 10080 → NULL
-5. remove_duplicates     → dedup ticket_id, keep=first
-6. drop_missing_required → xoá dòng thiếu ticket_id hoặc message
-```
-
-**Thứ tự quan trọng:** parse_timestamps phải chạy trước các bước khác để đảm bảo timestamp là datetime object khi cần so sánh.
+| Điều kiện | Hành động | Nơi lưu | Người approve merge lại |
+|-----------|-----------|---------|------------------------|
+| `chunk_text` rỗng hoặc quá ngắn (< 8 ký tự) | Quarantine (không drop hẳn) | `artifacts/quarantine/quarantine_<run_id>.csv` | Data Owner (nhóm Data Ops) review thủ công |
+| `doc_id` không nằm trong `allowed_doc_ids` (vd `legacy_catalog_xyz_zzz`) | Quarantine | `artifacts/quarantine/quarantine_<run_id>.csv` | Cần có yêu cầu chính thức mở rộng allowlist trong `data_contract.yaml` |
+| `chunk_text` chứa cửa sổ refund 14 ngày (stale) và `apply_refund_window_fix=True` | Tự động fix → cleaned | `artifacts/cleaned/` | Không cần — rule xác định rõ trong `cleaning_rules.py` |
+| `effective_date` không parse được (sai format) | Quarantine | `artifacts/quarantine/quarantine_<run_id>.csv` | Data Engineer kiểm tra nguồn, fix format rồi re-ingest |
+| Duplicate `chunk_text` trong cùng `doc_id` | Warn (không quarantine) — expectation `no_duplicate_chunk_text` severity=warn | Log warning trong `artifacts/logs/` | Không bắt buộc approve; team tự review |
 
 ---
 
-## SLA Cam kết
+## 4. Phiên bản & canonical
 
-| Chỉ số | Ngưỡng | Hành động khi vi phạm |
-|--------|--------|----------------------|
-| Data freshness | ≤ 24h | WARN trong monitor report |
-| Data freshness | ≤ 48h | FAIL — trigger alert |
-| Quality pass_rate | ≥ 85% | Pipeline tiếp tục + ghi cảnh báo |
-| Quality pass_rate | < 85% | Pipeline tiếp tục + escalate |
-| Null rate (critical cols) | ≤ 10% | WARN |
-| Null rate (critical cols) | > 30% | FAIL |
-| Duplicate rate | = 0% | Dedup tự động |
-
----
-
-## Quy trình xử lý khi breach
-
-```
-Phát hiện freshness breach (> 48h)
-    ↓
-1. Kiểm tra hệ thống export: có job nào fail không?
-2. Kiểm tra file source có được cập nhật không?
-3. Nếu chưa update: liên hệ IT Support Team để re-export
-4. Chạy lại pipeline với file mới
-5. Verify: freshness_check trả về PASS
-6. Ghi post-mortem vào runbook
-```
-
----
-
-## Versioning
-
-| Version | Ngày | Thay đổi |
-|---------|------|---------|
-| v1.0 | 2026-04-15 | Initial contract — Day 10 Lab |
-
----
-
-## Liên hệ
-
-| Vai trò | Trách nhiệm |
-|---------|------------|
-| Data Producer | IT Support System — export CSV hàng ngày |
-| Data Consumer | ETL Pipeline (Day 10) + RAG Agent (Day 08) |
-| Contract Owner | Monitoring/Docs Owner (Nguyễn Thành Nam) |
-
----
-
-*Day 10 Lab — AI in Action · VinUniversity · 2026*
+- **Source of truth cho policy refund**: `data/docs/policy_refund_v4.txt` — cửa sổ hoàn tiền **7 ngày làm việc** (version 4, `effective_date=2026-02-01`). Mọi chunk trong `policy_refund_v4` chứa "14 ngày" đều bị coi là lỗi migration từ v3 và phải được fix/quarantine.
+- **Source of truth cho HR leave policy**: `data/docs/hr_leave_policy.txt` bản `effective_date >= 2026-01-01` (12 ngày phép). Bản 2025 (10 ngày phép) là outdated và bị quarantine.
+- **Versioning**: `policy_versioning.hr_leave_min_effective_date = "2026-01-01"` được định nghĩa trong `contracts/data_contract.yaml` — không hard-code trong code.
+- **Canonical doc_id list**: xem `allowed_doc_ids` trong `contracts/data_contract.yaml`. Thêm nguồn mới phải cập nhật đồng thời `cleaning_rules.py` và contract này.

@@ -1,162 +1,80 @@
 # Báo Cáo Nhóm — Lab Day 09: Multi-Agent Orchestration
 
-**Tên nhóm:** ___________  
-**Thành viên:**
-| Tên | Vai trò | Email |
-|-----|---------|-------|
-| ___ | Supervisor Owner | ___ |
-| ___ | Worker Owner | ___ |
-| ___ | MCP Owner | ___ |
-| ___ | Trace & Docs Owner | ___ |
+**Tên nhóm:** C401-E3  
+**Ngày nộp:** 14/04/2026  
+**Repo:** https://github.com/jot2003/Lab8-Lab9-Lab10_C401_E3
 
-**Ngày nộp:** ___________  
-**Repo:** ___________  
-**Độ dài khuyến nghị:** 600–1000 từ
+## Thành viên và vai trò
 
----
-
-> **Hướng dẫn nộp group report:**
-> 
-> - File này nộp tại: `reports/group_report.md`
-> - Deadline: Được phép commit **sau 18:00** (xem SCORING.md)
-> - Tập trung vào **quyết định kỹ thuật cấp nhóm** — không trùng lặp với individual reports
-> - Phải có **bằng chứng từ code/trace** — không mô tả chung chung
-> - Mỗi mục phải có ít nhất 1 ví dụ cụ thể từ code hoặc trace thực tế của nhóm
+| Tên | Vai trò |
+|-----|---------|
+| Đặng Đình Tú Anh | Supervisor Owner |
+| Phạm Quốc Dũng | Retrieval + MCP Owner |
+| Quách Gia Được | Policy Worker Owner |
+| Hoàng Kim Trí Thành | Synthesis + Eval Owner |
+| Nguyễn Thành Nam | Trace + Docs Owner |
 
 ---
 
-## 1. Kiến trúc nhóm đã xây dựng (150–200 từ)
+## 1) Kiến trúc hệ thống
 
-> Mô tả ngắn gọn hệ thống nhóm: bao nhiêu workers, routing logic hoạt động thế nào,
-> MCP tools nào được tích hợp. Dùng kết quả từ `docs/system_architecture.md`.
+Nhóm triển khai kiến trúc Supervisor-Worker gồm `graph.py` (router), `workers/retrieval.py`, `workers/policy_tool.py`, `workers/synthesis.py` và `mcp_server.py`.
 
-**Hệ thống tổng quan:**
+- Supervisor quyết định route và ghi `supervisor_route`, `route_reason`.
+- Retrieval lấy bằng chứng từ ChromaDB.
+- Policy worker gọi MCP tools (`search_kb`, `get_ticket_info`, `check_access_permission`) cho các case policy/access.
+- Synthesis tạo câu trả lời grounded, trả `answer`, `sources`, `confidence`.
 
-_________________
-
-**Routing logic cốt lõi:**
-> Mô tả logic supervisor dùng để quyết định route (keyword matching, LLM classifier, rule-based, v.v.)
-
-_________________
-
-**MCP tools đã tích hợp:**
-> Liệt kê tools đã implement và 1 ví dụ trace có gọi MCP tool.
-
-- `search_kb`: ___________________
-- `get_ticket_info`: ___________________
-- ___________________: ___________________
+Hệ thống chạy đủ ba nhánh chính: `retrieval_worker`, `policy_tool_worker`, `multi_hop`.
 
 ---
 
-## 2. Quyết định kỹ thuật quan trọng nhất (200–250 từ)
+## 2) Quyết định kỹ thuật chính
 
-> Chọn **1 quyết định thiết kế** mà nhóm thảo luận và đánh đổi nhiều nhất.
-> Phải có: (a) vấn đề gặp phải, (b) các phương án cân nhắc, (c) lý do chọn phương án đã chọn.
+**Quyết định:** dùng rule-based routing theo thứ tự ưu tiên (`multi_hop` -> `sla` -> `policy` -> fallback) thay vì LLM router.
 
-**Quyết định:** ___________________
-
-**Bối cảnh vấn đề:**
-
-_________________
-
-**Các phương án đã cân nhắc:**
-
-| Phương án | Ưu điểm | Nhược điểm |
-|-----------|---------|-----------|
-| ___ | ___ | ___ |
-| ___ | ___ | ___ |
-
-**Phương án đã chọn và lý do:**
-
-_________________
-
-**Bằng chứng từ trace/code:**
-> Dẫn chứng cụ thể (VD: route_reason trong trace, đoạn code, v.v.)
-
-```
-[NHÓM ĐIỀN VÀO ĐÂY — ví dụ trace hoặc code snippet]
-```
+**Lý do chọn:**
+- deterministic và dễ debug bằng trace;
+- giữ được độ ổn định giữa các lần chạy grading;
+- phù hợp rubric Day 09 yêu cầu giải thích route.
 
 ---
 
-## 3. Kết quả grading questions (150–200 từ)
+## 3) Kết quả grading ở phiên bản hiện tại
 
-> Sau khi chạy pipeline với grading_questions.json (public lúc 17:00):
-> - Nhóm đạt bao nhiêu điểm raw?
-> - Câu nào pipeline xử lý tốt nhất?
-> - Câu nào pipeline fail hoặc gặp khó khăn?
+Nhóm chốt theo file `artifacts/grading_run.jsonl` mới nhất ở local sau lần chạy lại với bộ câu custom.
 
-**Tổng điểm raw ước tính:** ___ / 96
+- **Điểm ước lượng nội bộ:** `88/96` raw (~`27.5/30`).
+- **Các câu ổn định:** `gq01`, `gq03`, `gq04`, `gq05`, `gq06`, `gq07`, `gq08`, `gq10`.
+- **Điểm nghẽn chính:** `gq09` còn thiếu đủ bộ notification channels trong một số lần sinh câu trả lời (đặc biệt thiếu PagerDuty), nên dễ bị chấm Partial.
 
-**Câu pipeline xử lý tốt nhất:**
-- ID: ___ — Lý do tốt: ___________________
-
-**Câu pipeline fail hoặc partial:**
-- ID: ___ — Fail ở đâu: ___________________  
-  Root cause: ___________________
-
-**Câu gq07 (abstain):** Nhóm xử lý thế nào?
-
-_________________
-
-**Câu gq09 (multi-hop khó nhất):** Trace ghi được 2 workers không? Kết quả thế nào?
-
-_________________
+Ghi chú: kết quả có dao động giữa các run do bước synthesis vẫn dùng LLM generation.
 
 ---
 
-## 4. So sánh Day 08 vs Day 09 — Điều nhóm quan sát được (150–200 từ)
+## 4) So sánh Day 08 vs Day 09
 
-> Dựa vào `docs/single_vs_multi_comparison.md` — trích kết quả thực tế.
+- Day 09 mạnh hơn ở **debuggability**: trace có `route_reason`, `workers_called`, `mcp_tools_used`.
+- Day 09 mạnh hơn ở câu **multi-hop/policy** nhờ tách worker và MCP boundary.
+- Day 09 chậm hơn Day 08 do thêm bước route + orchestration.
 
-**Metric thay đổi rõ nhất (có số liệu):**
-
-_________________
-
-**Điều nhóm bất ngờ nhất khi chuyển từ single sang multi-agent:**
-
-_________________
-
-**Trường hợp multi-agent KHÔNG giúp ích hoặc làm chậm hệ thống:**
-
-_________________
+Day 08 baseline trong repo (`day08/lab/results/grading_auto.json`) có projected ~`25.41/30`; Day 09 hiện đạt mức ~`27.5/30` theo run mới nhất.
 
 ---
 
-## 5. Phân công và đánh giá nhóm (100–150 từ)
+## 5) Phân công công việc
 
-> Đánh giá trung thực về quá trình làm việc nhóm.
-
-**Phân công thực tế:**
-
-| Thành viên | Phần đã làm | Sprint |
-|------------|-------------|--------|
-| ___ | ___________________ | ___ |
-| ___ | ___________________ | ___ |
-| ___ | ___________________ | ___ |
-| ___ | ___________________ | ___ |
-
-**Điều nhóm làm tốt:**
-
-_________________
-
-**Điều nhóm làm chưa tốt hoặc gặp vấn đề về phối hợp:**
-
-_________________
-
-**Nếu làm lại, nhóm sẽ thay đổi gì trong cách tổ chức?**
-
-_________________
+| Thành viên | Phần chính |
+|------------|------------|
+| Tú Anh | `graph.py`, routing, state contracts |
+| Quốc Dũng | `retrieval.py`, MCP integration core |
+| Gia Được | `policy_tool.py`, exception path |
+| Trí Thành | `synthesis.py`, `eval_trace.py`, grading loop |
+| Thành Nam | docs/report tổng hợp |
 
 ---
 
-## 6. Nếu có thêm 1 ngày, nhóm sẽ làm gì? (50–100 từ)
+## 6) Nếu có thêm 1 ngày
 
-> 1–2 cải tiến cụ thể với lý do có bằng chứng từ trace/scorecard.
-
-_________________
-
----
-
-*File này lưu tại: `reports/group_report.md`*  
-*Commit sau 18:00 được phép theo SCORING.md*
+1. Thêm post-check deterministic cho `gq09` để bắt buộc đủ 3 kênh SLA notification.
+2. Thêm auto-grader script bám `grading_criteria` để giảm sai số chấm tay giữa các lần run.

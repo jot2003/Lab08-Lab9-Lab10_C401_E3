@@ -1,91 +1,90 @@
-# Báo Cáo Cá Nhân — Lab Day 10: Data Pipeline & Data Observability
+# Báo Cáo Cá Nhân — Lab Day 10: Data Pipeline & Observability
 
 **Họ và tên:** Nguyễn Thành Nam  
-**Mã số sinh viên:** 2A202600205  
-**Vai trò trong nhóm:** Docs & Runbook Owner (D10-T04)  
+**Vai trò:** Docs & Runbook — D10-T04  
 **Ngày nộp:** 2026-04-15  
-**Độ dài:** ~600 từ
+**Độ dài yêu cầu:** 400–650 từ
 
 ---
 
-## 1. Tôi phụ trách phần nào?
-
-**Task ID:** D10-T04 — scope theo `contracts/task_owner_map.json`: *"Runbook, architecture docs, incident documentation"*
-
-**File tôi trực tiếp viết:**
-
-| File | Nội dung cụ thể |
-|------|----------------|
-| `docs/runbook.md` | 2 incident đầy đủ 5 mục (INC-001 freshness FAIL, INC-002 stale refund chunk) + bảng post-mortem |
-| `docs/pipeline_architecture.md` | ASCII diagram toàn luồng ingest→clean→validate→embed→grading, bảng owner theo task_id, mục idempotency và liên hệ Day 09 |
-| `reports/group_report.md` | Điền toàn bộ 6 section: pipeline overview, bảng `metric_impact` (7 rows), before/after retrieval, freshness SLA, Day 09 link, risk table |
-
-**Kết nối với team:** Tôi phụ thuộc vào D10-T02 (Được) và D10-T03 (Dũng) để có artifacts (quarantine CSV, eval CSV, log) trước khi viết docs. Team phụ thuộc vào `group_report.md` của tôi để nộp bài và tránh bị trừ điểm vì thiếu `metric_impact`.
+> Viết **"tôi"**, đính kèm **run_id**, **tên file**, **đoạn log** hoặc **dòng CSV** thật.
 
 ---
 
-## 2. Một quyết định kỹ thuật trong phần docs
+## 1. Tôi phụ trách phần nào? (80–120 từ)
 
-**Quyết định: Gắn mỗi incident trực tiếp với artifact path cụ thể, không viết hướng dẫn chung chung.**
+**File / module:**
 
-Ban đầu tôi điền runbook theo template — 5 section nhưng chỉ là mô tả tổng quát như "kiểm tra manifest", "chạy lại pipeline". Khi đọc lại `TEAM_EXECUTION_GUIDE_DAY10.md` mục 6, tôi thấy yêu cầu rõ: "mở log trong `artifacts/logs/` và tìm `event_json=`" — nghĩa là runbook phải trích dẫn được event cụ thể.
+- `docs/runbook.md` — 2 incident đầy đủ 5 mục (Symptom → Detection → Diagnosis → Mitigation → Prevention): INC-001 freshness FAIL và INC-002 stale refund chunk; có bảng post-mortem với run_id, root cause, time to resolve.
+- `docs/pipeline_architecture.md` — ASCII diagram toàn luồng ingest → clean → validate → embed → grading; bảng ranh giới trách nhiệm theo `task_id` từ `contracts/task_owner_map.json`; mục idempotency và liên hệ Day 09.
+- `reports/group_report.md` — điền toàn bộ 6 section, đặc biệt bảng `metric_impact` (7 dòng) là yêu cầu bắt buộc của SCORING.md.
 
-Tôi đổi cách viết: mỗi bước Diagnosis và Mitigation đều dùng đường dẫn file thật và dòng lệnh copy-paste được. Ví dụ INC-001 Detection có đoạn trích thẳng từ log:
+**Kết nối với thành viên khác:** Tôi đọc artifact của D10-T02 (Được — `quarantine_dung-after-final.csv`) và D10-T03 (Dũng — `dung_before_bad_eval.csv`, `dung_after_final_eval.csv`) để điền số liệu vào bảng metric_impact và runbook. D10-T05 (Tri Thanh) cung cấp manifest `manifest_dung-after-final.json` làm nguồn dữ liệu freshness.
+
+**Bằng chứng:** commit `docs(day10-lab): complete D10-T04 runbook, architecture and group report` trên nhánh `chore/day10-nam-docs-monitoring`; commit `fix(day10-nam-docs)` sửa tên expectation và rule code.
+
+---
+
+## 2. Một quyết định kỹ thuật (100–150 từ)
+
+**Quyết định: Gắn từng bước Diagnosis và Mitigation trực tiếp với dòng log/artifact path cụ thể, không mô tả chung chung.**
+
+Khi bắt đầu điền runbook theo template, các mục Diagnosis chỉ ghi "kiểm tra manifest" hay "chạy lại pipeline" — đủ về cấu trúc nhưng không thể verify bằng artifact. Sau khi đọc `TEAM_EXECUTION_GUIDE_DAY10.md` mục 6 ("mở log trong `artifacts/logs/` và tìm `event_json=`"), tôi nhận ra reviewer sẽ test ngay bằng cách mở log — nếu không có dòng cụ thể thì runbook bị coi là placeholder.
+
+Tôi đổi cách viết: mỗi bước Diagnosis có bảng `| Bước | Việc làm | Kết quả mong đợi |` với đường dẫn file thật. INC-001 Detection trích thẳng từ log thực tế:
 
 ```
-freshness_check=FAIL {"latest_exported_at": "2026-04-10T08:00:00", ...}
-event_json={"task_id": "D10-T05", "level": "ERROR", "event": "freshness_check", ...}
+freshness_check=FAIL {"latest_exported_at": "2026-04-10T08:00:00", "age_hours": 120.388, "sla_hours": 24.0, "reason": "freshness_sla_exceeded"}
 ```
 
-**Trade-off:** Runbook gắn chặt với run cụ thể (`dung-after-final`) nên nếu nhóm đổi run_id thì cần cập nhật. Đổi lại, giảng viên có thể verify ngay mà không cần đoán.
+**Trade-off:** Runbook gắn chặt `run_id=dung-after-final`; nếu nhóm đổi run mới phải cập nhật. Đổi lại, giảng viên verify được ngay mà không cần đoán context.
 
 ---
 
-## 3. Một sự cố tôi phát hiện và xử lý
+## 3. Một lỗi hoặc anomaly đã xử lý (100–150 từ)
 
-**Vấn đề: Template `pipeline_architecture.md` ghi sai điểm đo freshness.**
+**Anomaly: Template `pipeline_architecture.md` mô tả sai điểm đo freshness — ghi "sau khi embed xong" thay vì đo từ `exported_at` trong raw CSV.**
 
-Template ban đầu mô tả sơ đồ chỉ là `raw → clean → validate → embed → serving` và ghi điểm đo freshness là "sau khi embed". Sau khi đọc `etl_pipeline.py` dòng 155:
+**Phát hiện:** Khi điền sơ đồ pipeline, tôi đọc `etl_pipeline.py` để tìm chỗ freshness được tính. Thấy dòng:
 
 ```python
 latest_exported = max((r.get("exported_at") or "" for r in cleaned), default="")
 ```
 
-Và `monitoring/freshness_check.py` hàm `check_manifest_freshness()` đọc `latest_exported_at` từ manifest — tức là freshness được đo từ `exported_at` trong CSV (thời điểm upstream export), **không phải** thời điểm chạy pipeline hay thời điểm embed xong.
+Và `monitoring/freshness_check.py` hàm `check_manifest_freshness()` đọc `latest_exported_at` từ manifest — nghĩa là điểm đo là `exported_at` trong CSV (thời điểm upstream export), **không phải** lúc pipeline chạy.
 
-Tôi sửa diagram để ghi chú rõ:
+**Tác động:** Nếu ghi sai, khi giảng viên hỏi "freshness tính từ lúc nào", nhóm không trả lời khớp code. Giảm điểm mục architecture docs.
+
+**Fix:** Sửa diagram để ghi chú rõ tại bước Ingest:
 ```
 exported_at = 2026-04-10T08:00:00  ← đây là điểm đo FRESHNESS_INGEST
 ```
-
-**Bằng chứng trước/sau:**
-
-| | Trước (template) | Sau (đã sửa) |
-|---|---|---|
-| Điểm đo freshness | "Sau khi embed xong" (sai) | `exported_at` trong raw CSV (đúng) |
-| Bảng owner | Trống — "___" | Đủ 6 hàng, task_id từ `contracts/task_owner_map.json` |
-| Số liệu | placeholder "..." | raw=10, cleaned=4, quarantine=6 từ `manifest_dung-after-final.json` |
-
-Phát hiện này quan trọng: nếu team giải thích sai "freshness đo ở publish step", giảng viên sẽ hỏi vặn và nhóm không trả lời được từ code thực.
+Đồng thời cập nhật danh sách expectation trong sơ đồ Validate từ tên tự bịa sang 6 tên thật từ log: `expectation[refund_no_stale_14d_window]`, `expectation[hr_leave_no_stale_10d_annual]`, v.v.
 
 ---
 
-## 4. Tự đánh giá
+## 4. Bằng chứng trước / sau (80–120 từ)
 
-**Làm tốt:** Bảng `metric_impact` trong `group_report.md` liên kết từng rule với file chứng cứ cụ thể (`dung_before_bad_eval.csv`, `quarantine_d10-c2.csv`, log line `expectation[refund_no_stale_14d_window] OK`). Điều này đáp ứng đúng yêu cầu của SCORING.md: "nhóm không điền metric_impact → dễ bị trừ khi tranh chấp".
+**run_id:** `dung-after-final` — `artifacts/manifests/manifest_dung-after-final.json`
 
-**Còn yếu:** Tôi viết docs sau khi nhóm đã chạy pipeline xong, nên không phát hiện sớm được vấn đề freshness FAIL để báo lên D10-T01 kịp thời. Trong thực tế, docs owner nên có mặt từ Sprint 1 để cùng thiết kế schema log.
+**Trước (inject — `dung_before_bad_eval.csv`):**
+```
+q_refund_window,...,top1_preview="...14 ngày làm việc...",contains_expected=yes,hits_forbidden=yes
+q_leave_version,...,top1_preview="12 ngày...",contains_expected=yes,hits_forbidden=no,top1_doc_expected=yes
+```
 
-**Nhóm phụ thuộc vào tôi:** `group_report.md` với bảng `metric_impact` — thiếu bảng này nhóm bị trừ điểm chống trivial theo SCORING.
+**Sau (clean — `dung_after_final_eval.csv`):**
+```
+q_refund_window,...,top1_preview="...7 ngày làm việc...",contains_expected=yes,hits_forbidden=no
+q_leave_version,...,top1_preview="12 ngày...",contains_expected=yes,hits_forbidden=no,top1_doc_expected=yes
+```
 
-**Tôi phụ thuộc vào:** D10-T02 (rule names trong `cleaning_rules.py`) và D10-T03 (expectation names trong log) để điền đúng tên vào bảng metric_impact và runbook.
+Thay đổi đo được: `q_refund_window` đổi từ `hits_forbidden=yes` → `hits_forbidden=no`, top1_preview từ **"14 ngày"** → **"7 ngày"**. Đây là bằng chứng trực tiếp cho INC-002 trong runbook của tôi: chunk_id=3 (stale v3 migration) đã bị quarantine bởi rule `stale_refund_migration_marker` trong `cleaning_rules.py`.
+
+Log xác nhận: `expectation[refund_no_stale_14d_window] OK (halt) :: violations=0`
 
 ---
 
-## 5. Nếu có thêm 2 giờ
+## 5. Cải tiến tiếp theo (40–80 từ)
 
-Tôi sẽ bổ sung **mục Prevention của INC-001** bằng cách thêm expectation `exported_at_freshness` vào `quality/expectations.py` — halt nếu max(`exported_at`) < now − 24h. Hiện tại freshness chỉ được check ở bước monitor (sau embed), nhưng nếu check sớm ở bước validate thì pipeline dừng trước khi embed dữ liệu cũ vào ChromaDB. Bằng chứng cần thiết: `expectation[exported_at_freshness] FAIL (halt)` xuất hiện trong log trước dòng `embed_upsert`.
-
----
-
-*Day 10 Lab — AI in Action · VinUniversity · 2026 · D10-T04*
+Nếu có thêm 2 giờ, tôi sẽ bổ sung **expectation `exported_at_freshness` vào `quality/expectations.py`** — halt nếu max(`exported_at`) trong cleaned < now − 24h. Hiện tại freshness chỉ check ở bước Monitor (sau embed), nhưng nếu check sớm ở bước Validate thì pipeline dừng trước khi embed dữ liệu cũ vào ChromaDB. Chứng minh bằng log: `expectation[exported_at_freshness] FAIL (halt)` xuất hiện trước dòng `embed_upsert`.
