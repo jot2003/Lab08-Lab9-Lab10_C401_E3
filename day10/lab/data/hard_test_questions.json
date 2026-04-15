@@ -1,0 +1,152 @@
+[
+  {
+    "id": "h01_refund_paraphrase",
+    "category": "paraphrase",
+    "difficulty": "medium",
+    "question": "Đơn hàng tôi muốn trả lại, tôi có bao lâu để gửi yêu cầu?",
+    "must_contain_any": ["7 ngày", "7 ngày làm việc"],
+    "must_not_contain": ["14 ngày", "14 ngày làm việc"],
+    "expect_top1_doc_id": "policy_refund_v4",
+    "note": "Paraphrase câu refund — không dùng từ 'hoàn tiền' trực tiếp"
+  },
+  {
+    "id": "h02_refund_digital_exception",
+    "category": "exception_case",
+    "difficulty": "hard",
+    "question": "Tôi mua license key, sản phẩm bị lỗi, tôi có được hoàn tiền không?",
+    "must_contain_any": ["kỹ thuật số", "license key", "không được hoàn tiền", "ngoại lệ"],
+    "must_not_contain": [],
+    "expect_top1_doc_id": "policy_refund_v4",
+    "note": "Phải lấy điều khoản ngoại lệ hàng kỹ thuật số, không phải điều kiện chung"
+  },
+  {
+    "id": "h03_refund_flash_sale",
+    "category": "exception_case",
+    "difficulty": "hard",
+    "question": "Đơn hàng tôi mua trong chương trình Flash Sale, tôi có được hoàn tiền không?",
+    "must_contain_any": ["flash sale", "không được hoàn", "khuyến mãi"],
+    "must_not_contain": [],
+    "expect_top1_doc_id": "policy_refund_v4",
+    "note": "Ngoại lệ Flash Sale — chunk phải nhắc đến đặc thù chương trình khuyến mãi"
+  },
+  {
+    "id": "h04_p1_resolution_not_response",
+    "category": "multi_condition",
+    "difficulty": "hard",
+    "question": "SLA để xử lý và khắc phục hoàn toàn một ticket P1 là bao lâu?",
+    "must_contain_any": ["4 giờ", "resolution"],
+    "must_not_contain": ["15 phút"],
+    "expect_top1_doc_id": "sla_p1_2026",
+    "note": "Khó vì dễ trả lời nhầm 15 phút (first response) thay vì 4 giờ (resolution)"
+  },
+  {
+    "id": "h05_p2_sla",
+    "category": "version_drift",
+    "difficulty": "medium",
+    "question": "Ticket P2 cần được phản hồi trong bao lâu?",
+    "must_contain_any": ["2 giờ", "p2"],
+    "must_not_contain": ["15 phút", "4 giờ"],
+    "expect_top1_doc_id": "sla_p1_2026",
+    "note": "Câu về P2 để kiểm tra retrieval không bị drift sang chunk P1"
+  },
+  {
+    "id": "h06_hr_leave_experienced",
+    "category": "version_drift",
+    "difficulty": "hard",
+    "question": "Nhân viên có hơn 5 năm kinh nghiệm được nghỉ phép bao nhiêu ngày?",
+    "must_contain_any": ["18 ngày"],
+    "must_not_contain": ["10 ngày", "12 ngày"],
+    "expect_top1_doc_id": "hr_leave_policy",
+    "note": "Phải phân biệt 3 mức nghỉ phép — tránh lẫn với 12 ngày (dưới 3 năm)"
+  },
+  {
+    "id": "h07_hr_leave_carryover",
+    "category": "multi_condition",
+    "difficulty": "hard",
+    "question": "Tôi còn phép năm nay chưa dùng, tôi có thể chuyển sang năm sau được không và tối đa bao nhiêu ngày?",
+    "must_contain_any": ["5 ngày", "chuyển năm", "năm tiếp theo"],
+    "must_not_contain": [],
+    "expect_top1_doc_id": "hr_leave_policy",
+    "note": "Hỏi về carry-over — không phải số ngày nghỉ cơ bản"
+  },
+  {
+    "id": "h08_hr_sick_leave",
+    "category": "multi_condition",
+    "difficulty": "medium",
+    "question": "Tôi bị ốm và muốn nghỉ, tôi được bao nhiêu ngày nghỉ ốm có lương?",
+    "must_contain_any": ["10 ngày", "nghỉ ốm", "sick leave"],
+    "must_not_contain": ["12 ngày phép năm", "15 ngày"],
+    "expect_top1_doc_id": "hr_leave_policy",
+    "note": "Phân biệt nghỉ ốm (10 ngày) với nghỉ phép năm (12 ngày); dễ lẫn khi chunk gần nhau"
+  },
+  {
+    "id": "h09_access_level3_approver",
+    "category": "multi_condition",
+    "difficulty": "hard",
+    "question": "Nhân viên cần Elevated Access thì ai phải phê duyệt?",
+    "must_contain_any": ["line manager", "it admin", "it security", "level 3"],
+    "must_not_contain": ["ciso", "level 4"],
+    "expect_top1_doc_id": "access_control_sop",
+    "note": "Hỏi approver cho Level 3 — phải không lẫn với Level 4 (CISO)"
+  },
+  {
+    "id": "h10_access_emergency_duration",
+    "category": "multi_condition",
+    "difficulty": "hard",
+    "question": "Trong sự cố khẩn cấp, quyền tạm thời được cấp tối đa bao lâu?",
+    "must_contain_any": ["24 giờ", "tạm thời"],
+    "must_not_contain": [],
+    "expect_top1_doc_id": "access_control_sop",
+    "note": "Escalation khẩn cấp — không phải thời gian xử lý thông thường"
+  },
+  {
+    "id": "h11_password_expiry",
+    "category": "paraphrase",
+    "difficulty": "medium",
+    "question": "Mật khẩu công ty tôi hết hạn sau bao lâu?",
+    "must_contain_any": ["90 ngày"],
+    "must_not_contain": [],
+    "expect_top1_doc_id": "it_helpdesk_faq",
+    "note": "Paraphrase — không dùng từ 'thay đổi định kỳ' hay 'đổi mật khẩu'"
+  },
+  {
+    "id": "h12_vpn_device_limit",
+    "category": "specific_detail",
+    "difficulty": "medium",
+    "question": "Tôi có thể kết nối VPN trên bao nhiêu thiết bị cùng lúc?",
+    "must_contain_any": ["2 thiết bị", "tối đa 2"],
+    "must_not_contain": [],
+    "expect_top1_doc_id": "it_helpdesk_faq",
+    "note": "Chi tiết nhỏ dễ bị bỏ qua — cần chunk VPN limit"
+  },
+  {
+    "id": "h13_refund_no_answer",
+    "category": "no_answer",
+    "difficulty": "hard",
+    "question": "Tôi có thể hoàn tiền sau 30 ngày kể từ khi mua hàng không?",
+    "must_contain_any": ["7 ngày", "không", "ngoài thời hạn"],
+    "must_not_contain": ["30 ngày", "được hoàn tiền sau 30"],
+    "expect_top1_doc_id": "policy_refund_v4",
+    "note": "Câu trap — 30 ngày vượt quá SLA 7 ngày; retrieval phải trả về điều kiện giới hạn thời gian"
+  },
+  {
+    "id": "h14_sla_old_version",
+    "category": "version_drift",
+    "difficulty": "hard",
+    "question": "SLA resolution P1 trước năm 2026 là bao lâu?",
+    "must_contain_any": ["6 giờ", "v2025", "2025"],
+    "must_not_contain": ["4 giờ"],
+    "expect_top1_doc_id": "sla_p1_2026",
+    "note": "Kiểm tra retrieval có nhận diện được lịch sử phiên bản SLA không (version drift)"
+  },
+  {
+    "id": "h15_remote_work_mandatory_days",
+    "category": "specific_detail",
+    "difficulty": "medium",
+    "question": "Ngày nào trong tuần nhân viên bắt buộc phải đến văn phòng?",
+    "must_contain_any": ["thứ 3", "thứ 5", "onsite"],
+    "must_not_contain": [],
+    "expect_top1_doc_id": "hr_leave_policy",
+    "note": "Chi tiết onsite bắt buộc trong remote work policy"
+  }
+]
