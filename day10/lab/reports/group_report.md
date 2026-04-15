@@ -1,90 +1,158 @@
 # Báo Cáo Nhóm — Lab Day 10: Data Pipeline & Data Observability
 
-**Tên nhóm:** ___________  
+**Tên nhóm:** C401-E3  
 **Thành viên:**
-| Tên | Vai trò (Day 10) | Email |
-|-----|------------------|-------|
-| ___ | Ingestion / Raw Owner | ___ |
-| ___ | Cleaning & Quality Owner | ___ |
-| ___ | Embed & Idempotency Owner | ___ |
-| ___ | Monitoring / Docs Owner | ___ |
 
-**Ngày nộp:** ___________  
-**Repo:** ___________  
-**Độ dài khuyến nghị:** 600–1000 từ
+| Tên | Vai trò (Day 10) | task_id |
+|-----|------------------|---------|
+| Hoang Kim Tri Thanh | Pipeline Integration & Embed Owner | D10-T00, D10-T05 |
+| Dang Dinh Tu Anh | Ingestion & Schema Owner | D10-T01 |
+| Quach Gia Duoc | Cleaning & Transformation Owner | D10-T02 |
+| Pham Quoc Dung | Quality & Grading Evidence Owner | D10-T03 |
+| Nguyen Thanh Nam | Docs & Runbook Owner | D10-T04 |
 
----
-
-> **Nộp tại:** `reports/group_report.md`  
-> **Deadline commit:** xem `SCORING.md` (code/trace sớm; report có thể muộn hơn nếu được phép).  
-> Phải có **run_id**, **đường dẫn artifact**, và **bằng chứng before/after** (CSV eval hoặc screenshot).
+**Ngày nộp:** 2026-04-15  
+**Repo:** https://github.com/jot2003/Lab8-Lab9-Lab10_C401_E3  
+**Run ID chính:** `dung-after-final`  
+**Artifact chính:** `artifacts/manifests/manifest_dung-after-final.json`
 
 ---
 
-## 1. Pipeline tổng quan (150–200 từ)
+## 1. Pipeline tổng quan
 
-> Nguồn raw là gì (CSV mẫu / export thật)? Chuỗi lệnh chạy end-to-end? `run_id` lấy ở đâu trong log?
+**Nguồn raw:** `data/raw/policy_export_dirty.csv` — 10 records mô phỏng export từ upstream DB/API, bao gồm 5 loại tài liệu nội bộ (policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy, và 1 doc legacy không hợp lệ). File có `exported_at = 2026-04-10T08:00:00`.
 
-**Tóm tắt luồng:**
+**Chuỗi lệnh chạy end-to-end:**
+```bash
+cd day10/lab
+pip install -r requirements.txt
+cp .env.example .env
+python etl_pipeline.py run --run-id <run_id>
+python eval_retrieval.py --out artifacts/eval/<run_id>_eval.csv
+python grading_run.py --out artifacts/eval/grading_run.jsonl
+```
 
-_________________
+**Lấy run_id từ log:** Dòng đầu tiên của `artifacts/logs/run_<run_id>.log`:
+```
+run_id=dung-after-final
+event_json={"ts": "2026-04-15T08:23:18...", "event": "run_start", ...}
+```
 
-**Lệnh chạy một dòng (copy từ README thực tế của nhóm):**
+**Kết quả run `dung-after-final`:**
+```
+raw_records       = 10
+cleaned_records   = 4
+quarantine_records= 6
+freshness_check   = FAIL  (exported_at delta ≈ 5 ngày > SLA 24h)
+PIPELINE_OK       ✓
+```
 
-_________________
+Manifest: `artifacts/manifests/manifest_dung-after-final.json`  
+Cleaned: `artifacts/cleaned/cleaned_dung-after-final.csv`  
+Quarantine: `artifacts/quarantine/quarantine_dung-after-final.csv`
 
 ---
 
-## 2. Cleaning & expectation (150–200 từ)
+## 2. Cleaning & expectation
 
-> Baseline đã có nhiều rule (allowlist, ngày ISO, HR stale, refund, dedupe…). Nhóm thêm **≥3 rule mới** + **≥2 expectation mới**. Khai báo expectation nào **halt**.
+### 2a. Bảng metric_impact (**bắt buộc**)
 
-### 2a. Bảng metric_impact (bắt buộc — chống trivial)
-
-| Rule / Expectation mới (tên ngắn) | Trước (số liệu) | Sau / khi inject (số liệu) | Chứng cứ (log / CSV / commit) |
-|-----------------------------------|------------------|-----------------------------|-------------------------------|
-| … | … | … | … |
+| Rule / Expectation mới (tên ngắn) | Trước — inject (`--no-refund-fix`) | Sau — clean (`dung-after-final`) | Chứng cứ |
+|-----------------------------------|------------------------------------|----------------------------------|-----------|
+| `refund_window_fix` (14→7 ngày) | chunk_id=3 trong index; `hits_forbidden=yes` cho q_refund_window | chunk_id=3 quarantined; `hits_forbidden=no` | `dung_before_bad_eval.csv` vs `dung_after_final_eval.csv` |
+| `hr_stale_version` (effective_date < 2026-01-01) | chunk_id=7 "10 ngày phép (HR 2025)" có thể retrieval | chunk_id=7 quarantined; q_leave_version trả về "12 ngày (2026)" | `quarantine_dung-after-final.csv` |
+| `allowlist_doc_id` (legacy_catalog bị block) | chunk_id=9 `legacy_catalog_xyz_zzz` có thể lọt vào index | chunk_id=9 quarantined | `quarantine_d10-c2.csv`, `quarantine_dung-after-final.csv` |
+| `effective_date_iso` (reject date format sai) | chunk_id=10 `effective_date=01/02/2026` (DD/MM/YYYY) có thể gây lỗi downstream | chunk_id=10 quarantined | `quarantine_d10-c3.csv` |
+| `no_empty_chunk` (reject text rỗng) | chunk_id=5 text="" lọt vào index | chunk_id=5 quarantined | log `event_json` rule `empty_text` |
+| Expectation `doc_id_in_allowlist` [halt] | Khi inject: halt nếu doc_id lạ lọt qua | Sau clean: pass vì chunk 9 đã bị rule filter trước | `artifacts/logs/run_dung-after-final.log` |
+| Expectation `no_stale_refund` [halt] | Khi `--no-refund-fix`: FAIL → halt | Sau fix: PASS | log `expectation[no_stale_refund] OK` |
 
 **Rule chính (baseline + mở rộng):**
+- `deduplicate_chunk_id`: xoá chunk trùng ID, giữ dòng đầu tiên
+- `drop_empty_text`: quarantine chunk có `chunk_text` rỗng hoặc null
+- `refund_window_fix`: quarantine chunk có "14 ngày" kết hợp "hoàn tiền" (stale v3)
+- `hr_stale_version`: quarantine chunk HR có `effective_date` < 2026-01-01
+- `allowlist_doc_id`: quarantine doc_id không nằm trong `{policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy, access_control_sop}`
+- `effective_date_iso`: quarantine dòng có `effective_date` không parse được theo ISO 8601
 
-- …
+**Ví dụ 1 lần expectation fail:**
 
-**Ví dụ 1 lần expectation fail (nếu có) và cách xử lý:**
-
-_________________
-
----
-
-## 3. Before / after ảnh hưởng retrieval hoặc agent (200–250 từ)
-
-> Bắt buộc: inject corruption (Sprint 3) — mô tả + dẫn `artifacts/eval/…` hoặc log.
-
-**Kịch bản inject:**
-
-_________________
-
-**Kết quả định lượng (từ CSV / bảng):**
-
-_________________
+Khi chạy `python etl_pipeline.py run --no-refund-fix --skip-validate`, log ghi:
+```
+expectation[no_stale_refund] FAIL (halt) :: chunk_id=3 vẫn còn trong cleaned
+WARN: expectation failed but --skip-validate → tiếp tục embed (chỉ dùng cho demo Sprint 3).
+```
+→ Kết quả eval: `q_refund_window` → `hits_forbidden=yes` (bằng chứng inject hoạt động đúng).
 
 ---
 
-## 4. Freshness & monitoring (100–150 từ)
+## 3. Before / after ảnh hưởng retrieval
 
-> SLA bạn chọn, ý nghĩa PASS/WARN/FAIL trên manifest mẫu.
+**Kịch bản inject (Sprint 3):**
 
-_________________
+Chạy pipeline với flag `--no-refund-fix --skip-validate` để bỏ qua rule quarantine chunk_id=3 (stale refund "14 ngày") và không dừng khi expectation fail. Chunk này lọt vào ChromaDB collection `day10_kb` và được retrieval khi hỏi về hoàn tiền.
+
+**Kết quả định lượng:**
+
+| Câu hỏi | Before (inject) | After (clean) | Thay đổi |
+|---------|-----------------|---------------|---------|
+| q_refund_window | `hits_forbidden=yes`, top1="14 ngày làm việc" | `hits_forbidden=no`, top1="7 ngày làm việc" | ✓ Fix |
+| q_p1_sla | `hits_forbidden=no` | `hits_forbidden=no` | — không đổi |
+| q_lockout | `hits_forbidden=no` | `hits_forbidden=no` | — không đổi |
+| q_leave_version | `contains_expected=yes` | `contains_expected=yes`, `top1_doc_expected=yes` | ✓ Tốt hơn |
+
+**Nguồn chứng cứ:**
+- Before: `artifacts/eval/dung_before_bad_eval.csv`
+- After: `artifacts/eval/dung_after_final_eval.csv`
+- Grading JSONL: `artifacts/eval/dung_grading_run.jsonl`
+
+**Kết luận:** Cleaning pipeline (đặc biệt `refund_window_fix` và `hr_stale_version`) trực tiếp cải thiện retrieval quality — giảm `hits_forbidden` từ 1/4 xuống 0/4 câu, tăng `top1_doc_expected` từ 1/4 lên 2/4 câu.
 
 ---
 
-## 5. Liên hệ Day 09 (50–100 từ)
+## 4. Freshness & monitoring
 
-> Dữ liệu sau embed có phục vụ lại multi-agent Day 09 không? Nếu có, mô tả tích hợp; nếu không, giải thích vì sao tách collection.
+**SLA chọn:** `FRESHNESS_SLA_HOURS=24` (1 ngày) — phù hợp với chu kỳ export daily của upstream policy DB.
 
-_________________
+| Status | Điều kiện | Ý nghĩa |
+|--------|-----------|---------|
+| PASS | delta < 12h | Dữ liệu đủ mới, embed tiếp tục bình thường |
+| WARN | 12h ≤ delta < 24h | Cảnh báo, pipeline vẫn chạy, cần kiểm tra upstream |
+| FAIL | delta ≥ 24h | Vi phạm SLA; ghi `level=ERROR` vào log; xem runbook INC-001 |
+
+Trong run `dung-after-final`: `latest_exported_at=2026-04-10`, delta ≈ 5 ngày → `freshness_check=FAIL`.  
+Đây là hành vi mong đợi với data mẫu có `exported_at` cố định. Trong production, fix bằng cách export lại với timestamp mới.
+
+Manifest mẫu: `artifacts/manifests/manifest_dung-after-final.json`  
+Log event: `"event": "freshness_check", "level": "ERROR"`
+
+---
+
+## 5. Liên hệ Day 09
+
+Pipeline Day 10 và Day 09 **dùng chung nội dung tài liệu** (5 docs TXT trong `data/docs/`) nhưng có **index riêng**:
+
+- **Day 09:** `retrieval_worker.py` query trực tiếp TXT files → ChromaDB collection `day09_docs`
+- **Day 10:** `etl_pipeline.py` xử lý CSV export → embed vào collection `day10_kb`
+
+Nếu muốn Day 09 workers dùng index đã làm sạch từ Day 10, đổi `.env` của Day 09:
+```
+CHROMA_COLLECTION=day10_kb
+```
+Điều này đảm bảo agent Day 09 không retrieval được chunk "14 ngày" (đã quarantine) khi trả lời câu hỏi về hoàn tiền.
 
 ---
 
 ## 6. Rủi ro còn lại & việc chưa làm
 
-- …
+| Rủi ro | Mức | Lý do chưa làm |
+|--------|-----|----------------|
+| Freshness FAIL sẽ tiếp tục khi data mẫu không đổi | CAO | `exported_at` cố định trong CSV mẫu; trong production cần export mới |
+| Chưa có alert tự động (email/Slack) khi freshness FAIL | TRUNG | Ngoài scope lab; cần tích hợp thêm |
+| Eval chỉ 4 câu hỏi — coverage thấp | TRUNG | Đủ để demo before/after; cần mở rộng bộ test |
+| chunk_id=10 (malformed date) vào quarantine nhưng nội dung có thể vẫn hữu ích | THẤP | Rule cần làm sạch date thay vì drop hoàn toàn |
+| `all-MiniLM-L6-v2` không tối ưu cho tiếng Việt | THẤP | Đủ cho lab; production cần model tiếng Việt (PhoBERT, BGE-M3...) |
+
+---
+
+*Day 10 Lab — AI in Action · VinUniversity · 2026*
